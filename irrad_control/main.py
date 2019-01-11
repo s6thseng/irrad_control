@@ -9,13 +9,12 @@ import paramiko
 from collections import OrderedDict
 from email import message_from_string
 from pkg_resources import get_distribution, DistributionNotFound
-
 from PyQt5 import QtCore, QtWidgets, QtGui
-
 from irrad_control.utils.logger import IrradLogger, LoggingStream
+from irrad_control.utils.worker import Worker
 from irrad_control.gui_widgets.daq_info_widget import DaqInfoWidget
 from irrad_control.gui_widgets.plot_widgets import *
-from irrad_control.gui_widgets.worker import Worker
+
 
 PROJECT_NAME = 'Irrad Control'
 GUI_AUTHORS = 'Pascal Wolf'
