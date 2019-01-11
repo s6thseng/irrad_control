@@ -250,8 +250,8 @@ class DaqInfoWidget(QtWidgets.QWidget):
         # Extract meta data and actual data
         meta_data, channel_data = data['meta'], data['data']
 
-        # Name of ADC
-        adc = meta_data['name']
+        # Name of ADC; first raw data will not have data rate
+        adc, drate = meta_data['name'], 0 if 'data_rate' not in meta_data else meta_data['data_rate']
 
         # First incoming data sets is displayed and sets timestamp
         if adc not in self.refresh_timestamp:
@@ -260,6 +260,9 @@ class DaqInfoWidget(QtWidgets.QWidget):
         # Timestamp, data rate and update
         timestamp = meta_data['timestamp']
         refresh_time = timestamp - self.refresh_timestamp[adc]
+
+        # Update data rate label
+        self.update_drate(adc=adc, drate=drate)
 
         # Only update widgets if it's time to refresh; if interval is 0, update all the time
         if refresh_time >= self.refresh_interval[adc] or self.refresh_interval[adc] == 0:
