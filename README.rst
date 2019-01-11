@@ -41,4 +41,11 @@ Setup control & DAQ
 
 The irradiation setup is controlled by a RaspberryPi 3 server which handles a XY-Stage as well as an extension
 `ADDA board <https://www.waveshare.com/wiki/High-Precision_AD/DA_Board>`_ which is used for beam current measurement.
-The server is automatically set up on first use with ``irrad_control``.
+A ``ssh key`` of the host PC must be copied to the server Raspberry Pi. Create and copy a key via
+
+.. code-block::
+
+   ssh-keygen -b 2048 -t rsa
+   ssh-copy-id pi@ip
+
+where ``ip`` is the local ip of within the network. The server is then automatically set up on first use with ``irrad_control``.
