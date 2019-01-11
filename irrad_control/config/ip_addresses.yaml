@@ -1,0 +1,5 @@
+# File containing known host and server ips
+server:
+  - 131.220.162.129
+host:
+  - 131.220.167.206
