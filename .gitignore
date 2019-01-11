@@ -1,0 +1,9 @@
+# pyc
+*.pyc
+# pycharm
+.idea/
+# eclipse
+.project
+.pydevproject
+# egg-info folder
+irrad_control.egg-info/
