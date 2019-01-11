@@ -1,7 +1,7 @@
 numpy  # C-like arrays and vectorized functions
-pyqt  # Qt library in Python
-pyqtgraph  # Fast plotting
-zaber.serial  # Zaber XY-Stage API
+pyzmq  # 0MQ
 paramiko  # SSH API in python
 scipy  # scientific python
 pyyaml  # yaml
+# pyqt  # Qt library in Python
+# pyqtgraph  # Fast plotting
