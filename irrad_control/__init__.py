@@ -27,8 +27,8 @@ ro_scales = OrderedDict([('1 %sA' % u'\u03bc', 1000.0), ('0.33 %sA' % u'\u03bc',
                          ('0.1 %sA' % u'\u03bc', 100.0), ('33 nA', 33.0), ('10 nA', 10.0), ('3.3 nA', 3.3)])
 
 # Types of hwd channels needed for interpretation
-with open(os.path.join(config_path, 'hwd_channels.yaml'), 'r') as hc:
-    hwd_channels = yaml.safe_load(hc)
+with open(os.path.join(config_path, 'roe_output.yaml'), 'r') as ro:
+    roe_output = yaml.safe_load(ro)
 
 # Types of hwd channels needed for interpretation
 with open(os.path.join(config_path, 'ip_addresses.yaml'), 'r') as ia:
