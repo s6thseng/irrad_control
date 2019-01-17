@@ -122,6 +122,8 @@ class RawDataPlot(pg.PlotWidget):
         self._time = None  # array for timestamps
         self._data = None
         self._start = 0  # starting timestamp of each cycle
+        self._timestamp = 0  # starting timestamp of each cycle
+        self._offset = 0  # starting timestamp of each cycle
         self._idx = 0  # cycling index through time axis
         self._period = period  # amount of time for which to display data; default, displaying last 60 seconds of data
         self._filled = False  # bool to see whether the array has been filled
@@ -156,7 +158,7 @@ class RawDataPlot(pg.PlotWidget):
         # Meta data and data
         _meta, _data = data['meta'], data['data']
 
-        timestamp = _meta['timestamp']
+        self._timestamp = _meta['timestamp']
 
         if 'data_rate' in _meta:
             self._drate = _meta['data_rate']
@@ -179,10 +181,11 @@ class RawDataPlot(pg.PlotWidget):
                 self._filled = True
 
             if self._idx == 0:
-                self._start = timestamp
+                self._start = self._timestamp
+                self._offset = 0
 
             # Set time axis
-            self._time[self._idx] = self._start - timestamp
+            self._time[self._idx] = self._start - self._timestamp + self._offset
             self._idx += 1
 
             # Set data in curves
@@ -228,19 +231,21 @@ class RawDataPlot(pg.PlotWidget):
         if decreased:  # THIS WORKS
             new_time = self._time[:shape]
             self._idx = 0 if self._idx >= shape else self._idx
+            self._filled = True if self._idx == 0 else False
 
-        else:  # THIS ONLY WORKS IF ARRAYS HAVE NOT BEEN FILLED: TODO: Find out why...
-            #new_time[:self._time.shape[0]] = self._time
-            #if self._filled:
-            #    self._idx = self._time.shape[0]
+        else:
+            new_time[:self._time.shape[0]] = self._time
+            if self._filled:
+                self._idx = self._time.shape[0]
+                self._start = self._timestamp
+                self._offset = self._time[-1]
             self._filled = False
-            self._idx = 0
 
         for ch in self.channels:
             if decreased:
                 new_data[ch] = self._data[ch][:shape]
-            #else:
-            #    new_data[ch][:self._data[ch].shape[0]] = self._data[ch]
+            else:
+                new_data[ch][:self._data[ch].shape[0]] = self._data[ch]
 
         self._time = new_time
         self._data = new_data
