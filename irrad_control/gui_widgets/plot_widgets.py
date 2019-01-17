@@ -12,18 +12,23 @@ MPL_COLORS = [(31, 119, 180), (255, 127, 14), (44, 160, 44), (214, 39, 40),
 
 class PlotWindow(QtWidgets.QMainWindow):
     """Window which only shows a PlotWidget as its central widget."""
-
+        
+    # PyQt signal which is emitted when the window closes
     closeWin = QtCore.pyqtSignal()
 
     def __init__(self, plot, parent=None):
         super(PlotWindow, self).__init__(parent)
-
+        
+        # PlotWidget to display in window
         self.plot = plot
+        
+        # Window appearance settings
         self.setWindowTitle(type(plot).__name__)
         self.screen = QtWidgets.QDesktopWidget().screenGeometry()
         self.setMinimumSize(0.75 * self.screen.width(), 0.75 * self.screen.height())
         self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
-
+        
+        # Set plot as central widget
         self.setCentralWidget(self.plot)
 
     def closeEvent(self, _):
@@ -32,23 +37,26 @@ class PlotWindow(QtWidgets.QMainWindow):
 
 
 class PlotWrapperWidget(QtWidgets.QWidget):
-    """Widget that wraps PlotWidgets and implements some additional features like checkboxes that allow
-    selecting the plots which are shown. Also adds button to show the respective PlotWidget in a QMainWindow"""
+    """Widget that wraps PlotWidgets and implements some additional features which allow to control the PlotWidgets content.
+    Also adds button to show the respective PlotWidget in a QMainWindow"""
 
     def __init__(self, plot=None, parent=None):
         super(PlotWrapperWidget, self).__init__(parent=parent)
 
-        # Layout
-        self.setLayout(QtWidgets.QVBoxLayout())
+        # PlotWidget to display; set size policy 
         self.plot = plot
-
-        # Layout for checkboxes which allow to show/hide curves in PlotWidgets
+        self.plot.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        
+        # Main layout and sub layout for e.g. checkboxes which allow to show/hide curves in PlotWidget etc.
+        self.setLayout(QtWidgets.QVBoxLayout())
         self.sub_layout = QtWidgets.QHBoxLayout()
-
+        
+        # Setup widget if class instance was initialized with plot
         if self.plot is not None:
             self._setup_widget()
 
     def _setup_widget(self):
+        """Setup of the additional widgets to control the appearance and content of the PlotWidget"""
 
         has_show_data_method = hasattr(self.plot, 'show_data')
 
@@ -74,38 +82,41 @@ class PlotWrapperWidget(QtWidgets.QWidget):
             spinbox.setSuffix(' s')
             spinbox.valueChanged.connect(lambda v: self.plot.update_period(v))
             self.sub_layout.addWidget(spinbox)
-
+        
+        # Button to move self.plot to PlotWindow instance
         self.btn = QtWidgets.QPushButton()
         self.btn.setIcon(self.btn.style().standardIcon(QtWidgets.QStyle.SP_TitleBarMaxButton))
         self.btn.setToolTip('Open plot in window')
-        self.btn.setFixedSize(30, 30)
+        self.btn.setFixedSize(25, 25)
         self.btn.clicked.connect(self.move_to_win)
+        self.btn.clicked.connect(lambda: self.layout().insertStretch(1))
         self.btn.clicked.connect(lambda: self.btn.setEnabled(False))
         self.sub_layout.addStretch()
         self.sub_layout.addWidget(self.btn)
-
-        self.layout().addLayout(self.sub_layout)
-        self.layout().addStretch()
-        self.layout().addWidget(self.plot)
+        
+        # Insert everything into main layout
+        self.layout().insertLayout(0, self.sub_layout)
+        self.layout().insertWidget(1, self.plot)
 
     def set_plot(self, plot):
+        """Set PlotWidget and set up widgets"""
         self.plot = plot
         self._setup_widget()
 
     def move_to_win(self):
+        """Move PlotWidget to PlotWindow. When window is closed, transfer widget back to self"""
         pw = PlotWindow(plot=self.plot, parent=self)
-        pw.closeWin.connect(lambda: self.layout().addWidget(self.plot))
+        pw.closeWin.connect(lambda: self.layout().takeAt(1))
+        pw.closeWin.connect(lambda: self.layout().insertWidget(1, self.plot))
         pw.closeWin.connect(lambda: self.btn.setEnabled(True))
         pw.show()
 
 
 class RawDataPlot(pg.PlotWidget):
-    """
-    Plot for displaying the raw data of all channels of the respective ADC over time.
-    Data is displayed in rolling manner over period seconds
-    """
+    """Plot for displaying the raw data of all channels of the respective ADC over time.
+    Data is displayed in rolling manner over period seconds"""
 
-    def __init__(self, daq_config, period=10, parent=None):
+    def __init__(self, daq_config, period=60, parent=None):
         super(RawDataPlot, self).__init__(parent=parent)
 
         # Init class attributes
@@ -122,15 +133,16 @@ class RawDataPlot(pg.PlotWidget):
         self._time = None  # array for timestamps
         self._data = None
         self._start = 0  # starting timestamp of each cycle
-        self._timestamp = 0  # starting timestamp of each cycle
-        self._offset = 0  # starting timestamp of each cycle
+        self._timestamp = 0  # timestamp of each incoming data
+        self._offset = 0  # offset for increasing cycle time
         self._idx = 0  # cycling index through time axis
         self._period = period  # amount of time for which to display data; default, displaying last 60 seconds of data
         self._filled = False  # bool to see whether the array has been filled
-        self._drate = None
+        self._drate = None  # data rate
 
     def _setup_plot(self):
-
+        """Setting up the plot. The Actual plot (self.plt) is the underlying PlotItem of the respective PlotWidget"""
+        
         # Get plot item and setup
         self.plt = self.getPlotItem()
         self.plt.setDownsampling(auto=True)
@@ -154,12 +166,15 @@ class RawDataPlot(pg.PlotWidget):
             self.show_data(ch)
 
     def set_data(self, data):
-
+        """Set the data of the plot. Input data is data plus meta data"""
+        
         # Meta data and data
         _meta, _data = data['meta'], data['data']
-
+        
+        # Store timestamp of current data
         self._timestamp = _meta['timestamp']
-
+        
+        # Set data rate if available
         if 'data_rate' in _meta:
             self._drate = _meta['data_rate']
 
@@ -175,21 +190,26 @@ class RawDataPlot(pg.PlotWidget):
 
         # Fill data
         else:
-
+            
+            # If we made one cycle, start again from the beginning
             if self._idx == self._time.shape[0]:
                 self._idx = 0
                 self._filled = True
-
+            
+            # If we start a new cycle, set new start timestamp and offset
             if self._idx == 0:
                 self._start = self._timestamp
                 self._offset = 0
 
             # Set time axis
             self._time[self._idx] = self._start - self._timestamp + self._offset
+            
+            # Increment index
             self._idx += 1
 
             # Set data in curves
             for ch in _data:
+                # Shift data to the right and set 0th element
                 self._data[ch][1:] = self._data[ch][:-1]
                 self._data[ch][0] = _data[ch]
 
@@ -199,7 +219,7 @@ class RawDataPlot(pg.PlotWidget):
                     self.curves[ch].setData(self._time, self._data[ch])
 
     def show_data(self, channel, show=True):
-
+        """Show/hide the data of channel in PlotItem"""
         if channel not in self.channels:
             logging.error('{} data not in graph. Current graphs: {}'.format(channel, ','.join(self.channels)))
             return
@@ -212,11 +232,13 @@ class RawDataPlot(pg.PlotWidget):
             self.plt.removeItem(self.curves[channel])
 
     def update_scale(self, scale):
+        """Update the scale of current axis"""
         self.ro_scale = scale
         self.plt.getAxis('right').setScale(scale=1e-9 / 5. * self.ro_scale)
 
     def update_period(self, period):
-
+        """Update the period of time for which the data is displayed in seconds"""
+        
         # Update attribute
         self._period = period
 
@@ -228,25 +250,39 @@ class RawDataPlot(pg.PlotWidget):
         # Check whether new time and data hold more or less indices
         decreased = True if self._time.shape[0] >= shape else False
 
-        if decreased:  # THIS WORKS
+        if decreased:
+            # Cut time axis
             new_time = self._time[:shape]
-            self._idx = 0 if self._idx >= shape else self._idx
+            
+            # If filled before, go to 0, else go to 0 if currnt index is bigger than new shape
+            if self._filled:
+                self._idx = 0
+            else:
+                self._idx = 0 if self._idx >= shape else self._idx
+            
+            # Set wheter the array is now filled
             self._filled = True if self._idx == 0 else False
 
         else:
+            # Extend time axis
             new_time[:self._time.shape[0]] = self._time
+            
+            # If array was filled before, go to last time, set it as offset and start from last timestamp
             if self._filled:
                 self._idx = self._time.shape[0]
                 self._start = self._timestamp
                 self._offset = self._time[-1]
+                
             self._filled = False
-
+        
+        # Set new time and data
         for ch in self.channels:
             if decreased:
                 new_data[ch] = self._data[ch][:shape]
             else:
                 new_data[ch][:self._data[ch].shape[0]] = self._data[ch]
-
+        
+        # Update
         self._time = new_time
         self._data = new_data
 
@@ -375,7 +411,7 @@ class BeamPositionPlot(pg.PlotWidget):
         self.legend = pg.LegendItem(offset=(80, -50))
         self.legend.setParentItem(self.plt)
 
-        self.curves = {}
+        self.curves = OrderedDict()
 
         # Check which channel types are present and fill curves
         if all(t in self.ro_types for t in ('sem_left', 'sem_right', 'sem_up', 'sem_down')):
