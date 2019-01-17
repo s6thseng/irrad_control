@@ -5,6 +5,7 @@ from collections import OrderedDict
 # Paths
 package_path = os.path.dirname(__file__)
 config_path = os.path.join(package_path, 'config')
+server_path = os.path.join(package_path, 'server')
 
 # Init several dicts with hardware specifications
 
