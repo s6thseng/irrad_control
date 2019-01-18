@@ -261,11 +261,9 @@ class DaqInfoWidget(QtWidgets.QWidget):
         timestamp = meta_data['timestamp']
         refresh_time = timestamp - self.refresh_timestamp[adc]
 
-        # Update data rate label
-        self.update_drate(adc=adc, drate=drate)
-
         # Only update widgets if it's time to refresh; if interval is 0, update all the time
         if refresh_time >= self.refresh_interval[adc] or self.refresh_interval[adc] == 0:
+            self.update_drate(adc=adc, drate=drate)
             self.update_table(adc=adc, ch_data=channel_data)
             self.refresh_timestamp[adc] = timestamp
 
