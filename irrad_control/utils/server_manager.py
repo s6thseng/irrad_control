@@ -1,7 +1,6 @@
 import os
 import time
 import logging
-import threading
 import paramiko
 import subprocess
 import tarfile
@@ -21,6 +20,9 @@ class ServerManager(object):
         # Input
         self.hname = hostname
         self.uname = username
+        
+        # Server process ID
+        self._server_pid = None
         
         # Setup SSH client and connect to server
         self.client = paramiko.SSHClient()
@@ -80,6 +82,24 @@ class ServerManager(object):
         
         self.exec_cmd('source /home/pi/miniconda/bin/activate; nohup python {}/server.py {} &'.format(self.remote_path, port))
         
+    def shutdown_server(self):
+        
+        if self._server_pid:
+        
+            logging.info('Shutting down server process with PID {}...'.format(self._server_pid))
+            
+            self.exec_cmd('kill {}'.format(self._server_pid))
+            
+        else:
+            
+            self.exec_cmd('killall python')
+        
+    def set_server_pid(self, pid):
+        
+        logging.info('Server process running with PID {}'.format(pid))
+        
+        self._server_pid = pid
+        
     def _call_subprocess(self, cmd_list):
         """Calls subprocess"""
         p = subprocess.Popen(cmd_list)
@@ -112,4 +132,3 @@ class ServerManager(object):
         sftp = self.client.open_sftp()
         sftp.put(local_filepath, remote_filepath)
         sftp.close()
-        

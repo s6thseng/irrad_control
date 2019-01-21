@@ -7,6 +7,7 @@ class WorkerSignals(QtCore.QObject):
     finished = QtCore.pyqtSignal()
     exceptionSignal = QtCore.pyqtSignal(Exception, str)
 
+
 class Worker(QtCore.QRunnable):
     """
     Implements a worker on which functions can be executed for multi-threading within Qt.
@@ -49,5 +50,4 @@ class Worker(QtCore.QRunnable):
             # Emit exception signal
             self.signals.exceptionSignal.emit(e, trc_bck)
             
-        finally:
-            self.signals.finished.emit()
+        self.signals.finished.emit()

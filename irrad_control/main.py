@@ -5,11 +5,12 @@ import platform
 import zmq
 import yaml
 import argparse
-import paramiko
 from collections import OrderedDict
 from email import message_from_string
 from pkg_resources import get_distribution, DistributionNotFound
 from PyQt5 import QtCore, QtWidgets, QtGui
+
+# Package imports
 from irrad_control.utils.logger import IrradLogger, LoggingStream
 from irrad_control.utils.worker import Worker
 from irrad_control.utils.server_manager import ServerManager
@@ -33,15 +34,13 @@ yaml.add_representer(OrderedDict, represent_dict_order)
 
 
 class IrradControlWin(QtWidgets.QMainWindow):
+    """Inits the main window of the irrad_control software."""
 
     # PyQt signals
     data_received = QtCore.pyqtSignal(dict)  # Signal for data
-    reply_received = QtCore.pyqtSignal(str)  # Signal for data
-    log_received = QtCore.pyqtSignal(str)
+    reply_received = QtCore.pyqtSignal(dict)  # Signal for reply
+    log_received = QtCore.pyqtSignal(str)  # Signal for log
 
-    """
-    Inits the main window of the irrad_control software.
-    """
     def __init__(self, config_file, parent=None):
         super(IrradControlWin, self).__init__(parent)
 
@@ -53,22 +52,27 @@ class IrradControlWin(QtWidgets.QMainWindow):
         # Needed in ordeer to stop helper threads
         self.receive_data = True
         self.receive_log = True
-        self.receive_reply = True
         
-        # ZMQ context; THIS IS THREADSAFE! SOCKETS ARE NOT! EACH SOCKET NEEDS TO BE CREATED WITHIN ITS RESPECTIVE THREAD/PROCESS!
+        # ZMQ context; THIS IS THREADSAFE! SOCKETS ARE NOT!
+        # EACH SOCKET NEEDS TO BE CREATED WITHIN ITS RESPECTIVE THREAD/PROCESS!
         self.context = zmq.Context()
-        self.server_req = self.context.socket(zmq.REQ)
         
-        # QThreadPool manages GUI threads on its own
+        # QThreadPool manages GUI threads on its own; every runnable started via start(runnable) is auto-deleted after.
         self.threadpool = QtCore.QThreadPool()
+
+        # Server hardware that can receive commands using self.send_cmd method
+        self.server_recipients = ('server', 'adc', 'stage')
         
+        # Connect signals
         self.data_received.connect(lambda data: self.handle_data(data))
         self.reply_received.connect(lambda reply: self.handle_reply(reply))
         self.log_received.connect(lambda log: logging.info(log))
         
+        # Inits
         self._init_ui()
         self._init_logging()
         self._init_server()
+        self._init_data_log()
         self._init_threads()
         
     def _init_ui(self):
@@ -162,10 +166,10 @@ class IrradControlWin(QtWidgets.QMainWindow):
                 layout.addWidget(pos_widget)
                 
                 self.tw[name] = widget
-                
-            else:
-                self.tw[name] = QtWidgets.QWidget()
-            self.tabs.addTab(self.tw[name], name)
+            
+            #else:
+                #self.tw[name] = QtWidgets.QWidget()
+                self.tabs.addTab(self.tw[name], name)
             
     def _init_docks(self):
         """Initializes corresponding log and daq info dock"""
@@ -196,8 +200,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         # Add to main layout
         self.sub_splitter.addWidget(self.daq_info_dock)
-        
-            
+
     def _init_logging(self, loglevel=logging.INFO):
         """Initializes a custom logging handler and redirects stdout/stderr"""
 
@@ -218,16 +221,19 @@ class IrradControlWin(QtWidgets.QMainWindow):
         logging.info('Started "irrad_control" on %s' % platform.system())
         
     def _init_server(self):
-        
-        if 'fake_data' not in self.config:
-        
-            self.server = ServerManager(hostname=self.config['tcp']['ip']['server'])
-            prep_worker = Worker(func=self.server.prepare_server)
-            prep_worker.signals.finished.connect(lambda: self.server.start_server_process(self.config['tcp']['port']['server']))
-            prep_worker.signals.finished.connect(self.server_req.connect(self._tcp_addr(self.config['tcp']['port']['server'],
-                                                                                        self.config['tcp']['ip']['server'])))
-            
-            self.threadpool.start(prep_worker)
+
+        # SSH connection to server pi
+        self.server = ServerManager(hostname=self.config['tcp']['ip']['server'])
+
+        # Worker that sets up the Raspberry Pi server by running installation script (install miniconda etc.)
+        server_prep_worker = Worker(func=self.server.prepare_server)
+
+        # Connect server preparation workers finished signal to launch server process
+        for connection in [lambda: self.server.start_server_process(self.config['tcp']['port']['server']),
+                           lambda: self.send_cmd(recipient='server', cmd='setup_server', cmd_data=self.config)]:
+            server_prep_worker.signals.finished.connect(connection)
+
+        self.threadpool.start(server_prep_worker)
             
     def _init_threads(self):       
                 
@@ -237,6 +243,21 @@ class IrradControlWin(QtWidgets.QMainWindow):
         
         for worker in self.workers:
             self.threadpool.start(self.workers[worker])
+            
+    def _init_data_log(self):
+        # Open log files for all adcs
+        self.log_files = dict([(adc, open(self.config['log']['file'].split('.')[0] + '_{}.txt'.format(adc), 'a'))
+                               for adc in self.config['daq']])
+
+        for adc in self.log_files:    
+            # write info header
+            self.log_files[adc].write('# Date: %s \n' % time.asctime())
+    
+            # write data header
+            d_header = '# Timestamp / s\t' + ' \t'.join('%s / V' % c for c in self.config['daq'][adc]['channels']) + '\n'
+            d_header += '# ch_types / s\t' + ' \t'.join('%s / V' % c for c in self.config['daq'][adc]['types']) + '\n'
+            
+            self.log_files[adc].write(d_header)
         
     def _tcp_addr(self, port, ip='*'):
         """Creates string of complete tcp address which sockets can bind to"""
@@ -249,15 +270,51 @@ class IrradControlWin(QtWidgets.QMainWindow):
             self.daq_info_widget.update_data(data)
             self.raw_plot.set_data(data)
             self.pos_plot.set_data(data)
+            self._log_data(data)
             
+    def send_cmd(self, recipient, cmd, cmd_data=None):
+        """Send a command *cmd* to a recipient *recipient* running within the server process.
+        The command can have respective data *cmd_data*. Recipients must be listed in
+        self.server_recipients."""
+
+        if recipient not in self.server_recipients:
+            msg = '{} not in known by server process. Known recipients: {}'.format(recipient,
+                                                                                   ', '.join(self.server_recipients))
+            logging.error(msg)
+            return
+
+        cmd_dict = {'recipient': recipient, 'cmd': cmd, 'data': cmd_data}
+        cmd_worker = Worker(self._send_cmd_get_reply, cmd_dict)
+        self.threadpool.start(cmd_worker)
+
+    def _send_cmd_get_reply(self, cmd_dict):
+        """Sending a command to the server and waiting for its reply. This runs on a separate QThread due
+        to the blocking nature of the recv() method of sockets. *cmd_dict* contains the recipient, cmd and cmd_data."""
+
+        # Spawn socket to send request to server and connect
+        server_req = self.context.socket(zmq.REQ)
+        server_req.connect(self._tcp_addr(self.config['tcp']['port']['server'], self.config['tcp']['ip']['server']))
+
+        # Send command dict and wait for reply
+        server_req.send_json(cmd_dict)
+        server_reply = server_req.recv_json()
+
+        # Emit the received reply in pyqt signal and close socket
+        self.reply_received.emit(server_reply)
+        server_req.close()
+
     def handle_reply(self, reply):
+        _reply = reply['reply']
+        _reply_data = None if 'data' not in reply else reply['data']
         print reply
+        if _reply == 'server_pid':
+            self.server.set_server_pid(_reply_data)
             
     def recv_data(self):
         
         # Data subscriber
         data_sub = self.context.socket(zmq.SUB)
-        data_sub.connect(self._tcp_addr(self.config['tcp']['port']['raw_data'], 'localhost'))#self.config['tcp']['ip']['server']))
+        data_sub.connect(self._tcp_addr(self.config['tcp']['port']['raw_data'], self.config['tcp']['ip']['server']))
         data_sub.setsockopt(zmq.SUBSCRIBE, '')
         
         data_timestamp = None
@@ -294,40 +351,18 @@ class IrradControlWin(QtWidgets.QMainWindow):
                 self.log_received.emit(log)
 
     def _log_data(self, data):
-        
-        logfile = self.config['log']['file']
-        
-        # open outfile(s)
-        self.log_files = dict([(adc, open(logfile.split('.')[0] + '_{}.txt'.format(adc), 'a')) for adc in self.config['daq']])
-        
-        for adc in self.log_files:    
-            # write info header
-            self.log_files[adc].write('# Date: %s \n' % time.asctime())
-    
-            # write data header
-            d_header = '# Timestamp / s\t' + ' \t'.join('%s / V' % c for c in self.config['daq'][adc]['channels']) + '\n'
-            d_header += '# ch_types / s\t' + ' \t'.join('%s / V' % c for c in self.config['daq'][adc]['types']) + '\n'
             
-            self.log_files[adc].write(d_header)
+        timestamp = data['meta']['timestamp']
+        _data = data['data']
+        adc = data['meta']['name']
         
-        logging.info('Log data receiver ready')
+        if self.receive_data:
         
-        while self.receive_data:
-            
-            meta_data = data_sub.recv_json()
-            
-            timestamp = meta_data['timestamp']
-            data = meta_data['data']
-            adc = meta_data['name']
-            
             # write timestamp to file
             self.log_files[adc].write('%f\t' % timestamp)
-
+    
             # write voltages to file
-            self.log_files[adc].write('\t'.join('%.{}f'.format(3) % data[v] for v in self.config['daq'][adc]['channels']) + '\n')
-        
-        for log_file in self.log_files:
-            log_file.close()
+            self.log_files[adc].write('\t'.join('%.{}f'.format(3) % _data[v] for v in self.config['daq'][adc]['channels']) + '\n')
 
     def handle_messages(self, message, ms=4000):
         """Handles messages from the tabs shown in QMainWindows statusBar"""
@@ -354,10 +389,22 @@ class IrradControlWin(QtWidgets.QMainWindow):
             msg_box = QtWidgets.QMessageBox.information(self, title, msg, QtWidgets.QMessageBox.Ok)
             
     def _clean_up(self):
+        # Stop receiver threads and delete
         self.receive_data = False
         self.receive_log = False
-        self.receive_reply = False
         self.threadpool.clear()
+        
+        # Close open log files
+        for log_file in self.log_files:
+            self.log_files[log_file].close()
+            
+        # Kill server process on host
+        self.server.shutdown_server()
+        
+        # Give 1 second to shut everything down
+        start = time.time()
+        while time.time() - start < 1:
+            QtWidgets.QApplication.processEvents()
         
     def file_quit(self):
         self._clean_up()
