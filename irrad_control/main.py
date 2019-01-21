@@ -15,7 +15,7 @@ from irrad_control.utils.logger import IrradLogger, LoggingStream
 from irrad_control.utils.worker import Worker
 from irrad_control.utils.server_manager import ServerManager
 from irrad_control.gui_widgets.daq_info_widget import DaqInfoWidget
-from irrad_control.gui_widgets.plot_widgets import PlotWrapperWidget, RawDataPlot,BeamPositionPlot
+from irrad_control.gui_widgets.monitor_tab import IrradMonitor
 
 
 PROJECT_NAME = 'Irrad Control'
@@ -148,24 +148,9 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         # Initialize each tab
         for name in self.tab_order:
-            #if name == 'Setup':
-                #self.tw[name] = QtWidgets.QPushButton('Send config')
-                #self.tw[name].clicked.connect(lambda: self.server_req.send_json({'cmd': 'setup_server', 'data': self.config}))
+
             if name == 'Monitor':
-                widget = QtWidgets.QWidget()
-                layout = QtWidgets.QHBoxLayout()
-                widget.setLayout(layout)
-                
-                self.raw_plot = RawDataPlot(self.config['daq']['SEM_C'])
-                self.pos_plot = BeamPositionPlot(self.config['daq']['SEM_C'])
-                
-                raw_widget = PlotWrapperWidget(self.raw_plot)
-                pos_widget = PlotWrapperWidget(self.pos_plot)
-                
-                layout.addWidget(raw_widget)
-                layout.addWidget(pos_widget)
-                
-                self.tw[name] = widget
+                self.tw[name] = IrradMonitor(daq_config=self.config['daq'])
             
             #else:
                 #self.tw[name] = QtWidgets.QWidget()
@@ -267,9 +252,13 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         # Check whether data is interpreted
         if data['meta']['type'] == 'raw':
+            adc = data['meta']['name']
+
             self.daq_info_widget.update_data(data)
-            self.raw_plot.set_data(data)
-            self.pos_plot.set_data(data)
+
+            for plot in self.tw['Monitor'].plots[adc]:
+                self.tw['Monitor'].plots[adc][plot].set_data(data)
+
             self._log_data(data)
             
     def send_cmd(self, recipient, cmd, cmd_data=None):
