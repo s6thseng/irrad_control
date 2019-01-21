@@ -1,13 +1,16 @@
 import logging
 import pyqtgraph as pg
 import numpy as np
-from PyQt5 import QtWidgets, QtCore
+from PyQt5 import QtWidgets, QtCore, QtGui
 from collections import OrderedDict
 from irrad_control import roe_output
 
 # Matplotlib first 8 default colors
 MPL_COLORS = [(31, 119, 180), (255, 127, 14), (44, 160, 44), (214, 39, 40),
               (148, 103, 189), (140, 86, 75), (227, 119, 194), (127, 127, 127)]
+
+BOLD_FONT = QtGui.QFont()
+BOLD_FONT.setBold(True)
 
 
 class PlotWindow(QtWidgets.QMainWindow):
@@ -62,10 +65,15 @@ class PlotWrapperWidget(QtWidgets.QWidget):
 
         # Create checkboxes in order to show/hide curves in plots
         if has_show_data_method and hasattr(self.plot, 'curves'):
-            self.sub_layout.addWidget(QtWidgets.QLabel('Show curve:'))
+            self.sub_layout.addWidget(QtWidgets.QLabel('Show curve(s):'))
+            all_checkbox = QtWidgets.QCheckBox('All')
+            all_checkbox.setFont(BOLD_FONT)
+            all_checkbox.setChecked(True)
+            self.sub_layout.addWidget(all_checkbox)
             for curve in self.plot.curves:
                 checkbox = QtWidgets.QCheckBox(curve)
                 checkbox.setChecked(True)
+                all_checkbox.stateChanged.connect(lambda _, cbx=checkbox: cbx.setChecked(all_checkbox.isChecked()))
                 checkbox.stateChanged.connect(lambda v, n=checkbox.text(): self.plot.show_data(n, bool(v)))
                 self.sub_layout.addWidget(checkbox)
         else:
@@ -218,18 +226,22 @@ class RawDataPlot(pg.PlotWidget):
                 else:
                     self.curves[ch].setData(self._time, self._data[ch])
 
-    def show_data(self, channel, show=True):
-        """Show/hide the data of channel in PlotItem"""
-        if channel not in self.channels:
-            logging.error('{} data not in graph. Current graphs: {}'.format(channel, ','.join(self.channels)))
+    def show_data(self, curve=None, show=True):
+        """Show/hide the data of curve in PlotItem. If *curve* is None, all curves are shown/hidden."""
+
+        if curve is not None and curve not in self.curves:
+            logging.error('{} data not in graph. Current graphs: {}'.format(curve, ','.join(self.curves.keys())))
             return
 
-        if show:
-            self.legend.addItem(self.curves[channel], channel)
-            self.plt.addItem(self.curves[channel])
-        else:
-            self.legend.removeItem(channel)
-            self.plt.removeItem(self.curves[channel])
+        _curves = [curve] if curve is not None else self.curves.keys()
+
+        for _cu in _curves:
+            if show:
+                self.legend.addItem(self.curves[_cu], _cu)
+                self.plt.addItem(self.curves[_cu])
+            else:
+                self.legend.removeItem(_cu)
+                self.plt.removeItem(self.curves[_cu])
 
     def update_scale(self, scale):
         """Update the scale of current axis"""
@@ -457,15 +469,23 @@ class BeamPositionPlot(pg.PlotWidget):
         # Horizontally, if we are shifted to the left the graph should move to the left, therefore * -1
         return res if res is None else -1 * res if m == 'h' else res
 
-    def show_data(self, curve, show=True):
+    def show_data(self, curve=None, show=True):
+        """Show/hide the data of channel in PlotItem. If *channel* is None, all curves are shown/hidden."""
 
-        if curve in self.curves:
+        if curve is not None and curve not in self.curves:
+            logging.error('{} data not in graph. Current graphs: {}'.format(curve, ','.join(self.curves.keys())))
+            return
+
+        _curves = [curve] if curve is not None else self.curves.keys()
+
+        for _cu in _curves:
+
             if show:
-                self.curves[curve].add_to_plot()
-                self.curves[curve].add_to_legend()
+                self.curves[_cu].add_to_plot()
+                self.curves[_cu].add_to_legend()
             else:
-                self.curves[curve].remove_from_plot()
-                self.curves[curve].remove_from_legend()
+                self.curves[_cu].remove_from_plot()
+                self.curves[_cu].remove_from_legend()
 
 
 class BeamCurrentPlot(pg.PlotWidget):
