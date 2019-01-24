@@ -3,7 +3,6 @@ import pyqtgraph as pg
 import numpy as np
 from PyQt5 import QtWidgets, QtCore, QtGui
 from collections import OrderedDict
-from irrad_control import roe_output
 
 # Matplotlib first 8 default colors
 MPL_COLORS = [(31, 119, 180), (255, 127, 14), (44, 160, 44), (214, 39, 40),
@@ -23,7 +22,7 @@ class PlotWindow(QtWidgets.QMainWindow):
         super(PlotWindow, self).__init__(parent)
         
         # PlotWidget to display in window
-        self.plot = plot
+        self.pw = plot
         
         # Window appearance settings
         self.setWindowTitle(type(plot).__name__)
@@ -32,7 +31,7 @@ class PlotWindow(QtWidgets.QMainWindow):
         self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
         
         # Set plot as central widget
-        self.setCentralWidget(self.plot)
+        self.setCentralWidget(self.pw)
 
     def closeEvent(self, _):
         self.closeWin.emit()
@@ -47,51 +46,65 @@ class PlotWrapperWidget(QtWidgets.QWidget):
         super(PlotWrapperWidget, self).__init__(parent=parent)
 
         # PlotWidget to display; set size policy 
-        self.plot = plot
-        self.plot.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        self.pw = plot
+        self.pw.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         
         # Main layout and sub layout for e.g. checkboxes which allow to show/hide curves in PlotWidget etc.
         self.setLayout(QtWidgets.QVBoxLayout())
-        self.sub_layout = QtWidgets.QHBoxLayout()
+        self.sub_layout = QtWidgets.QVBoxLayout()
         
         # Setup widget if class instance was initialized with plot
-        if self.plot is not None:
+        if self.pw is not None:
             self._setup_widget()
 
     def _setup_widget(self):
         """Setup of the additional widgets to control the appearance and content of the PlotWidget"""
 
-        has_show_data_method = hasattr(self.plot, 'show_data')
+        _sub_layout_1 = QtWidgets.QHBoxLayout()
+        _sub_layout_2 = QtWidgets.QHBoxLayout()
 
         # Create checkboxes in order to show/hide curves in plots
-        if has_show_data_method and hasattr(self.plot, 'curves'):
-            self.sub_layout.addWidget(QtWidgets.QLabel('Show curve(s):'))
+        if hasattr(self.pw, 'show_data') and hasattr(self.pw, 'curves'):
+            _sub_layout_1.addWidget(QtWidgets.QLabel('Show curve(s):'))
             all_checkbox = QtWidgets.QCheckBox('All')
             all_checkbox.setFont(BOLD_FONT)
             all_checkbox.setChecked(True)
-            self.sub_layout.addWidget(all_checkbox)
-            for curve in self.plot.curves:
+            _sub_layout_2.addWidget(all_checkbox)
+            for curve in self.pw.curves:
                 checkbox = QtWidgets.QCheckBox(curve)
                 checkbox.setChecked(True)
                 all_checkbox.stateChanged.connect(lambda _, cbx=checkbox: cbx.setChecked(all_checkbox.isChecked()))
-                checkbox.stateChanged.connect(lambda v, n=checkbox.text(): self.plot.show_data(n, bool(v)))
-                self.sub_layout.addWidget(checkbox)
-        else:
-            logging.warning("{} has no 'show_data' method. Please implement it!".format(type(self.plot).__name__))
+                checkbox.stateChanged.connect(lambda v, n=checkbox.text(): self.pw.show_data(n, bool(v)))
+                _sub_layout_2.addWidget(checkbox)
 
-        has_update_period_method = hasattr(self.plot, 'update_period')
+        else:
+            logging.warning("{} has no 'show_data' method. Please implement it!".format(type(self.pw).__name__))
+
+        _sub_layout_1.addStretch()
 
         # Whenever x axis is time add spinbox to change time period for which data is shown
-        if has_update_period_method:
+        if hasattr(self.pw, 'update_period'):
+
+            # Add horizontal helper line if we're looking at scrolling data plot
+            unit = self.pw.plt.getAxis('left').labelUnits or '[?]'
+            label = self.pw.plt.getAxis('left').labelText or 'Value'
+            self.helper_line = pg.InfiniteLine(angle=0, label=label + ': {value:.2E} ' + unit)
+            self.helper_line.setMovable(True)
+            self.helper_line.setPen(color='w', style=pg.QtCore.Qt.DashLine, width=2)
+            hl_checkbox = QtWidgets.QCheckBox('Show helper line')
+            hl_checkbox.stateChanged.connect(
+                lambda v: self.pw.plt.addItem(self.helper_line) if v else self.pw.plt.removeItem(self.helper_line))
+            _sub_layout_1.addWidget(hl_checkbox)
+
             spinbox = QtWidgets.QSpinBox()
             spinbox.setRange(1, 3600)
-            spinbox.setValue(self.plot._period)
+            spinbox.setValue(self.pw._period)
             spinbox.setPrefix('Time period: ')
             spinbox.setSuffix(' s')
-            spinbox.valueChanged.connect(lambda v: self.plot.update_period(v))
-            self.sub_layout.addWidget(spinbox)
-        
-        # Button to move self.plot to PlotWindow instance
+            spinbox.valueChanged.connect(lambda v: self.pw.update_period(v))
+            _sub_layout_1.addWidget(spinbox)
+
+        # Button to move self.pw to PlotWindow instance
         self.btn = QtWidgets.QPushButton()
         self.btn.setIcon(self.btn.style().standardIcon(QtWidgets.QStyle.SP_TitleBarMaxButton))
         self.btn.setToolTip('Open plot in window')
@@ -99,40 +112,39 @@ class PlotWrapperWidget(QtWidgets.QWidget):
         self.btn.clicked.connect(self.move_to_win)
         self.btn.clicked.connect(lambda: self.layout().insertStretch(1))
         self.btn.clicked.connect(lambda: self.btn.setEnabled(False))
-        self.sub_layout.addStretch()
-        self.sub_layout.addWidget(self.btn)
+        _sub_layout_1.addWidget(self.btn)
+
+        self.sub_layout.addLayout(_sub_layout_1)
+        self.sub_layout.addLayout(_sub_layout_2)
         
         # Insert everything into main layout
         self.layout().insertLayout(0, self.sub_layout)
-        self.layout().insertWidget(1, self.plot)
+        self.layout().insertWidget(1, self.pw)
 
     def set_plot(self, plot):
         """Set PlotWidget and set up widgets"""
-        self.plot = plot
+        self.pw = plot
         self._setup_widget()
 
     def move_to_win(self):
         """Move PlotWidget to PlotWindow. When window is closed, transfer widget back to self"""
-        pw = PlotWindow(plot=self.plot, parent=self)
+        pw = PlotWindow(plot=self.pw, parent=self)
         pw.closeWin.connect(lambda: self.layout().takeAt(1))
-        pw.closeWin.connect(lambda: self.layout().insertWidget(1, self.plot))
+        pw.closeWin.connect(lambda: self.layout().insertWidget(1, self.pw))
         pw.closeWin.connect(lambda: self.btn.setEnabled(True))
         pw.show()
 
 
-class RawDataPlot(pg.PlotWidget):
-    """Plot for displaying the raw data of all channels of the respective ADC over time.
-    Data is displayed in rolling manner over period seconds"""
+class ScrollingIrradDataPlot(pg.PlotWidget):
+    """PlotWidget which displays a set of irradiation data curves over time"""
 
-    def __init__(self, daq_config, period=60, parent=None):
-        super(RawDataPlot, self).__init__(parent=parent)
+    def __init__(self, channels, ro_scale=None, units=None, period=60, name=None, parent=None):
+        super(ScrollingIrradDataPlot, self).__init__(parent)
 
-        # Init class attributes
-        self.daq_config = daq_config
-        self.channels = daq_config['channels']
-        self.ro_types = daq_config['types']
-        self.ro_scale = daq_config['ro_scale']
-        self.adc = None
+        self.channels = channels
+        self.ro_scale = ro_scale
+        self.units = units
+        self.name = name
 
         # Setup the main plot
         self._setup_plot()
@@ -150,20 +162,26 @@ class RawDataPlot(pg.PlotWidget):
 
     def _setup_plot(self):
         """Setting up the plot. The Actual plot (self.plt) is the underlying PlotItem of the respective PlotWidget"""
-        
+
         # Get plot item and setup
         self.plt = self.getPlotItem()
         self.plt.setDownsampling(auto=True)
-        self.plt.setLabel('left', text='Signal', units='V')
-        self.plt.setLabel('right', text='Signal', units='A')
-        self.plt.getAxis('right').setScale(scale=1e-9/5. * self.ro_scale)
+        self.plt.setLabel('left', text='Signal', units='V' if self.units is None else self.units['left'])
+
+        # Title
+        self.plt.setTitle('' if self.name is None else self.name)
+
+        # Additional axis if specified
+        if 'right' in self.units:
+            self.plt.setLabel('right', text='Signal', units=self.units['right'])
+
+        # X-axis is time
         self.plt.setLabel('bottom', text='Time', units='s')
         self.plt.showGrid(x=True, y=True, alpha=0.66)
-        self.plt.setRange(yRange=[-5., 5.])
         self.plt.setLimits(xMax=0)
 
         # Make OrderedDict of curves
-        self.curves = OrderedDict([(ch, pg.PlotCurveItem(pen=MPL_COLORS[i%len(MPL_COLORS)])) for i, ch in enumerate(self.channels)])
+        self.curves = OrderedDict([(ch, pg.PlotCurveItem(pen=MPL_COLORS[i % len(MPL_COLORS)])) for i, ch in enumerate(self.channels)])
 
         # Make legend entries for curves
         self.legend = pg.LegendItem(offset=(80, -50))
@@ -172,59 +190,6 @@ class RawDataPlot(pg.PlotWidget):
         # Show data and legend
         for ch in self.channels:
             self.show_data(ch)
-
-    def set_data(self, data):
-        """Set the data of the plot. Input data is data plus meta data"""
-        
-        # Meta data and data
-        _meta, _data = data['meta'], data['data']
-        
-        # Store timestamp of current data
-        self._timestamp = _meta['timestamp']
-        
-        # Set data rate if available
-        if 'data_rate' in _meta:
-            self._drate = _meta['data_rate']
-
-        # Get data rate from data in order to set time axis
-        if self._time is None:
-            if 'data_rate' in _meta:
-                self._drate = _meta['data_rate']
-                shape = int(round(self._drate) * self._period + 1)
-                self._time = np.zeros(shape=shape)
-                self._data = OrderedDict([(ch, np.zeros(shape=shape)) for i, ch in enumerate(self.channels)])
-
-            self.plt.setTitle(_meta['name'] + ' raw data')
-
-        # Fill data
-        else:
-            
-            # If we made one cycle, start again from the beginning
-            if self._idx == self._time.shape[0]:
-                self._idx = 0
-                self._filled = True
-            
-            # If we start a new cycle, set new start timestamp and offset
-            if self._idx == 0:
-                self._start = self._timestamp
-                self._offset = 0
-
-            # Set time axis
-            self._time[self._idx] = self._start - self._timestamp + self._offset
-            
-            # Increment index
-            self._idx += 1
-
-            # Set data in curves
-            for ch in _data:
-                # Shift data to the right and set 0th element
-                self._data[ch][1:] = self._data[ch][:-1]
-                self._data[ch][0] = _data[ch]
-
-                if not self._filled:
-                    self.curves[ch].setData(self._time[self._data[ch] != 0], self._data[ch][self._data[ch] != 0])
-                else:
-                    self.curves[ch].setData(self._time, self._data[ch])
 
     def show_data(self, curve=None, show=True):
         """Show/hide the data of curve in PlotItem. If *curve* is None, all curves are shown/hidden."""
@@ -243,14 +208,65 @@ class RawDataPlot(pg.PlotWidget):
                 self.legend.removeItem(_cu)
                 self.plt.removeItem(self.curves[_cu])
 
-    def update_scale(self, scale):
+    def set_data(self, data):
+        """Set the data of the plot. Input data is data plus meta data"""
+
+        # Meta data and data
+        _meta, _data = data['meta'], data['data']
+
+        # Store timestamp of current data
+        self._timestamp = _meta['timestamp']
+
+        # Set data rate if available
+        if 'data_rate' in _meta:
+            self._drate = _meta['data_rate']
+
+        # Get data rate from data in order to set time axis
+        if self._time is None:
+            if 'data_rate' in _meta:
+                self._drate = _meta['data_rate']
+                shape = int(round(self._drate) * self._period + 1)
+                self._time = np.zeros(shape=shape)
+                self._data = OrderedDict([(ch, np.zeros(shape=shape)) for i, ch in enumerate(self.channels)])
+
+        # Fill data
+        else:
+
+            # If we made one cycle, start again from the beginning
+            if self._idx == self._time.shape[0]:
+                self._idx = 0
+                self._filled = True
+
+            # If we start a new cycle, set new start timestamp and offset
+            if self._idx == 0:
+                self._start = self._timestamp
+                self._offset = 0
+
+            # Set time axis
+            self._time[self._idx] = self._start - self._timestamp + self._offset
+
+            # Increment index
+            self._idx += 1
+
+            # Set data in curves
+            for ch in _data:
+                # Shift data to the right and set 0th element
+                self._data[ch][1:] = self._data[ch][:-1]
+                self._data[ch][0] = _data[ch]
+
+                if not self._filled:
+                    self.curves[ch].setData(self._time[self._data[ch] != 0], self._data[ch][self._data[ch] != 0])
+                else:
+                    self.curves[ch].setData(self._time, self._data[ch])
+
+    def update_scale(self, scale, axis='left', update=True):
         """Update the scale of current axis"""
-        self.ro_scale = scale
-        self.plt.getAxis('right').setScale(scale=1e-9 / 5. * self.ro_scale)
+        self.ro_scale = scale if update else self.ro_scale
+        self.plt.getAxis(axis).setScale(scale=scale)
 
     def update_period(self, period):
         """Update the period of time for which the data is displayed in seconds"""
-        
+
         # Update attribute
         self._period = period
 
@@ -265,38 +281,71 @@ class RawDataPlot(pg.PlotWidget):
         if decreased:
             # Cut time axis
             new_time = self._time[:shape]
-            
+
             # If filled before, go to 0, else go to 0 if currnt index is bigger than new shape
             if self._filled:
                 self._idx = 0
             else:
                 self._idx = 0 if self._idx >= shape else self._idx
-            
+
             # Set wheter the array is now filled
             self._filled = True if self._idx == 0 else False
 
         else:
             # Extend time axis
             new_time[:self._time.shape[0]] = self._time
-            
+
             # If array was filled before, go to last time, set it as offset and start from last timestamp
             if self._filled:
                 self._idx = self._time.shape[0]
                 self._start = self._timestamp
                 self._offset = self._time[-1]
-                
+
             self._filled = False
-        
+
         # Set new time and data
         for ch in self.channels:
             if decreased:
                 new_data[ch] = self._data[ch][:shape]
             else:
                 new_data[ch][:self._data[ch].shape[0]] = self._data[ch]
-        
+
         # Update
         self._time = new_time
         self._data = new_data
+
+
+class RawDataPlot(ScrollingIrradDataPlot):
+    """Plot for displaying the raw data of all channels of the respective ADC over time.
+        Data is displayed in rolling manner over period seconds"""
+
+    def __init__(self, daq_config, daq_device=None, parent=None):
+
+        # Init class attributes
+        self.daq_config = daq_config
+        self.daq_device = daq_device
+
+        # Call __init__ of ScrollingIrradDataPlot
+        super(RawDataPlot, self).__init__(channels=daq_config['channels'], units={'left': 'V', 'right': 'A'},
+                                          name=self.daq_device, parent=parent)
+
+        self.plt.setRange(yRange=[-5., 5.])
+        self.update_scale(scale=1e-9 / 5. * daq_config['ro_scale'], axis='right')
+
+
+class BeamCurrentPlot(ScrollingIrradDataPlot):
+    """Plot for displaying the proton beam current over time. Data is displayed in rolling manner over period seconds"""
+
+    def __init__(self, daq_device=None, parent=None):
+
+        # Call __init__ of ScrollingIrradDataPlot
+        super(BeamCurrentPlot, self).__init__(channels=['analog', 'digital'], units={'left': 'A', 'right': 'A'},
+                                              name=daq_device, parent=parent)
+
+        # Scale in nA
+        self.plt.hideAxis('left')
+        self.plt.showAxis('right')
+        self.plt.getAxis('right').labelUnitPrefix = 'n'
 
 
 class BeamPositionItem:
@@ -390,7 +439,7 @@ class BeamPositionPlot(pg.PlotWidget):
     Plot for displaying the beam position. The position is displayed from analog and digital data if available.
     """
 
-    def __init__(self, daq_config, parent=None):
+    def __init__(self, daq_config, daq_device=None, parent=None):
         super(BeamPositionPlot, self).__init__(parent=parent)
 
         # Init class attributes
@@ -398,7 +447,7 @@ class BeamPositionPlot(pg.PlotWidget):
         self.channels = daq_config['channels']
         self.ro_types = daq_config['types']
         self.ro_scale = daq_config['ro_scale']
-        self.adc = None
+        self.daq_device = daq_device
 
         # Possible curves
         self.d_pos = 'digital_pos'
@@ -412,6 +461,7 @@ class BeamPositionPlot(pg.PlotWidget):
         # Get plot item and setup
         self.plt = self.getPlotItem()
         self.plt.setDownsampling(auto=True)
+        self.plt.setTitle('' if self.daq_device is None else self.daq_device)
         self.plt.setLabel('left', text='Vertical displacement', units='V')
         self.plt.setLabel('bottom', text='Horizontal displacement', units='V')
         self.plt.showGrid(x=True, y=True, alpha=0.66)
@@ -486,10 +536,6 @@ class BeamPositionPlot(pg.PlotWidget):
             else:
                 self.curves[_cu].remove_from_plot()
                 self.curves[_cu].remove_from_legend()
-
-
-class BeamCurrentPlot(pg.PlotWidget):
-    pass
 
 
 class FluenceMap(pg.ViewBox):
