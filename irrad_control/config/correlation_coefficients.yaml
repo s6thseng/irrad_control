@@ -1,0 +1,10 @@
+# Correlation coefficient(s) of the carbon SEM for on-line measurements of the HISKP proton beam current.
+# The beam current I_Beam is calculated by the SEM sum signal U_SEM in [V], the 5V full-scale scale R_fs
+# of the custom readout electronics (3.3,10,33,100,330,1000) in [nA] and the correlation coefficient lambda in [1/V] like:
+# I_Beam(U_SEM) = lambda * R_fs * U_SEM
+lambda_1:
+  nominal: 770.97e-3
+  sigma: 4.93e-3
+  unit: 1/V
+  ascitime: Thu Jan 23 00:00:00 2019 
+  
