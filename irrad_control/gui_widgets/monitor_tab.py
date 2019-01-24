@@ -1,6 +1,6 @@
 from PyQt5 import QtCore, QtWidgets
 from collections import OrderedDict
-from irrad_control.gui_widgets.plot_widgets import RawDataPlot, BeamPositionPlot, PlotWrapperWidget
+from irrad_control.gui_widgets.plot_widgets import RawDataPlot, BeamPositionPlot, PlotWrapperWidget, BeamCurrentPlot
 
 
 class IrradMonitor(QtWidgets.QWidget):
@@ -11,7 +11,7 @@ class IrradMonitor(QtWidgets.QWidget):
 
         self.daq_config = daq_config
 
-        self.monitors = ('raw', 'interpreter')
+        self.monitors = ('raw', 'interpreted')
 
         self.daq_tabs = QtWidgets.QTabWidget()
 
@@ -38,16 +38,18 @@ class IrradMonitor(QtWidgets.QWidget):
                     monitor_widget.setOrientation(QtCore.Qt.Horizontal)
                     monitor_widget.setChildrenCollapsible(False)
 
-                    self.plots[adc]['raw_plot'] = RawDataPlot(self.daq_config[adc])
-                    self.plots[adc]['pos_plot'] = BeamPositionPlot(self.daq_config[adc])
+                    self.plots[adc]['raw_plot'] = RawDataPlot(self.daq_config[adc], daq_device=adc)
+                    self.plots[adc]['pos_plot'] = BeamPositionPlot(self.daq_config[adc], daq_device=adc)
 
                     raw_wrapper = PlotWrapperWidget(self.plots[adc]['raw_plot'])
                     pos_wrapper = PlotWrapperWidget(self.plots[adc]['pos_plot'])
 
                     monitor_widget.addWidget(raw_wrapper)
                     monitor_widget.addWidget(pos_wrapper)
-                else:
-                    monitor_widget = QtWidgets.QWidget()
+                elif monitor == 'interpreted':
+
+                    self.plots[adc]['current_plot'] = BeamCurrentPlot(daq_device=adc)
+                    monitor_widget = PlotWrapperWidget(self.plots[adc]['current_plot'])
 
                 monitor_tabs.addTab(monitor_widget, monitor.capitalize())
 
