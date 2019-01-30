@@ -25,5 +25,6 @@ setup(
     include_package_data=True,  # accept all data files and directories matched by MANIFEST.in or found in source control
     package_data={'': ['README.*', 'VERSION'], 'docs': ['*'], 'examples': ['*']},
     keywords=['radiation damage', 'NIEL', 'silicon', 'irradiation', 'proton', 'fluence'],
-    platforms='any'
+    platforms='any',
+    entry_points={'console_scripts': ['irrad_control = irrad_control.main:main']}
 )
