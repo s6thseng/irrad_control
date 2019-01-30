@@ -32,5 +32,9 @@ with open(os.path.join(config_path, 'roe_output.yaml'), 'r') as ro:
     roe_output = yaml.safe_load(ro)
 
 # Types of hwd channels needed for interpretation
-with open(os.path.join(config_path, 'ip_addresses.yaml'), 'r') as ia:
-    ip_addresses = yaml.safe_load(ia)
+with open(os.path.join(config_path, 'server_ips.yaml'), 'r') as si:
+    server_ips = yaml.safe_load(si)
+
+# Proportionality constants between SEM signal and proton beam current
+with open(os.path.join(config_path, 'proportionality_constants.yaml'), 'r') as pc:
+    proportionality_constants = yaml.safe_load(pc)
