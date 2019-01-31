@@ -434,3 +434,10 @@ class IrradSetup(QtWidgets.QWidget):
         tmp_daq['ro_scale'] = ro_scales[self.daq_widgets['scale_combo'].currentText()]
 
         self.setup['daq'][self.daq_widgets['name_edit'].text()] = tmp_daq
+
+    def set_read_only(self, read_only=True):
+
+        # Disable/enable main widgets to set to read_only
+        self.left_widget.setEnabled(not read_only)
+        self.right_widget.setEnabled(not read_only)
+        self.btn_ok.setEnabled(not read_only)
