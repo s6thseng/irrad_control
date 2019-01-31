@@ -399,7 +399,7 @@ class IrradSetup(QtWidgets.QWidget):
         """Update the info into the setup dict"""
 
         # Update
-        self.session_id = self.session_widgets['id_edit'].text()
+        self.session_id = self.session_widgets['id_edit'].text() or self.session_widgets['id_edit'].placeholderText()
         self.output_path = self.session_widgets['folder_edit'].text()
         self.log_file = self.session_widgets['logfile_edit'].text() or self.session_widgets['logfile_edit'].placeholderText()
 
