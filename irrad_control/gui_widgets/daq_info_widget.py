@@ -9,14 +9,14 @@ class DaqInfoWidget(QtWidgets.QWidget):
     configuration of the RO electronics for each ADC such as the 5V full scale and channel type.
     """
 
-    def __init__(self, daq_config, table_fontsize=(12, 14), parent=None):
+    def __init__(self, daq_setup, table_fontsize=(12, 14), parent=None):
         super(DaqInfoWidget, self).__init__(parent)
 
         # Init class attributes
-        self.daq_config = daq_config
+        self.daq_setup = daq_setup
 
         # Data related per ADC
-        self.adcs = self.daq_config.keys()
+        self.adcs = self.daq_setup.keys()
         self.channels = {}
         self.ch_types = {}
         self.n_channels = {}
@@ -28,9 +28,9 @@ class DaqInfoWidget(QtWidgets.QWidget):
 
         # Check number of DAQ ADCs
         for adc in self.adcs:
-            self.channels[adc] = self.daq_config[adc]['channels']
-            self.ch_types[adc] = self.daq_config[adc]['types']
-            self.n_channels[adc] = len(self.daq_config[adc]['channels'])
+            self.channels[adc] = self.daq_setup[adc]['channels']
+            self.ch_types[adc] = self.daq_setup[adc]['types']
+            self.n_channels[adc] = len(self.daq_setup[adc]['channels'])
 
         # Info related per ADC
         self.n_digits = dict(zip(self.adcs, [3] * len(self.adcs)))
@@ -80,8 +80,8 @@ class DaqInfoWidget(QtWidgets.QWidget):
             info_layout = QtWidgets.QGridLayout()
 
             # Fill info layout with labels and widgets
-            # Check info in daq_config
-            _cnfg = self.daq_config[adc]
+            # Check info in daq_setup
+            _cnfg = self.daq_setup[adc]
             _srate_lbl = '' if 'sampling_rate' not in _cnfg else _cnfg['sampling_rate']
             _avgs_lbl = '' if 'sampling_rate' not in _cnfg else ads1256['avgs'][_cnfg['sampling_rate']]
             _ro_lbl = '' if 'ro_scale' not in _cnfg else ''.join([s for s in ro_scales.keys() if ro_scales[s] == _cnfg['ro_scale']])
@@ -302,4 +302,4 @@ class DaqInfoWidget(QtWidgets.QWidget):
         self.full_scale_labels[adc].setText('5V full-scale: {}'.format(scale))
 
     def _calc(self, adc, val):
-        return val if self.unit[adc] == 'V' else (val / 5.0 * self.daq_config[adc]['ro_scale'])  # 5V from RO electronics
+        return val if self.unit[adc] == 'V' else (val / 5.0 * self.daq_setup[adc]['ro_scale'])  # 5V from RO electronics

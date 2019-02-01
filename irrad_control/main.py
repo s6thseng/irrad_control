@@ -274,7 +274,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         # Create missing tabs
         self.control_tab = QtWidgets.QWidget(parent=self.tabs)
-        self.monitor_tab = IrradMonitor(daq_config=self.setup['daq'], parent=self.tabs)
+        self.monitor_tab = IrradMonitor(daq_setup=self.setup['daq'], parent=self.tabs)
 
         # TODO: connections of control tab
 

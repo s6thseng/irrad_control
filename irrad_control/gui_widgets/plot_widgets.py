@@ -319,28 +319,32 @@ class RawDataPlot(ScrollingIrradDataPlot):
     """Plot for displaying the raw data of all channels of the respective ADC over time.
         Data is displayed in rolling manner over period seconds"""
 
-    def __init__(self, daq_config, daq_device=None, parent=None):
+    def __init__(self, daq_setup, daq_device=None, parent=None):
 
         # Init class attributes
-        self.daq_config = daq_config
-        self.daq_device = daq_device
+        self.daq_setup = daq_setup
 
         # Call __init__ of ScrollingIrradDataPlot
-        super(RawDataPlot, self).__init__(channels=daq_config['channels'], units={'left': 'V', 'right': 'A'},
-                                          name=self.daq_device, parent=parent)
+        super(RawDataPlot, self).__init__(channels=daq_setup['channels'], units={'left': 'V', 'right': 'A'},
+                                          name=type(self).__name__ + ('' if daq_device is None else ' ' + daq_device),
+                                          parent=parent)
 
         self.plt.setRange(yRange=[-5., 5.])
-        self.update_scale(scale=1e-9 / 5. * daq_config['ro_scale'], axis='right')
+        self.update_scale(scale=1e-9 / 5. * daq_setup['ro_scale'], axis='right')
 
 
 class BeamCurrentPlot(ScrollingIrradDataPlot):
     """Plot for displaying the proton beam current over time. Data is displayed in rolling manner over period seconds"""
 
-    def __init__(self, daq_device=None, parent=None):
+    def __init__(self, beam_current_setup=None, daq_device=None, parent=None):
+
+        # Init class attributes
+        self.beam_current_setup = beam_current_setup
 
         # Call __init__ of ScrollingIrradDataPlot
         super(BeamCurrentPlot, self).__init__(channels=['analog', 'digital'], units={'left': 'A', 'right': 'A'},
-                                              name=daq_device, parent=parent)
+                                              name=type(self).__name__ + ('' if daq_device is None else ' ' + daq_device),
+                                              parent=parent)
 
         # Scale in nA
         self.plt.hideAxis('left')
@@ -439,14 +443,14 @@ class BeamPositionPlot(pg.PlotWidget):
     Plot for displaying the beam position. The position is displayed from analog and digital data if available.
     """
 
-    def __init__(self, daq_config, daq_device=None, parent=None):
+    def __init__(self, daq_setup, daq_device=None, parent=None):
         super(BeamPositionPlot, self).__init__(parent=parent)
 
         # Init class attributes
-        self.daq_config = daq_config
-        self.channels = daq_config['channels']
-        self.ro_types = daq_config['types']
-        self.ro_scale = daq_config['ro_scale']
+        self.daq_setup = daq_setup
+        self.channels = daq_setup['channels']
+        self.ro_types = daq_setup['types']
+        self.ro_scale = daq_setup['ro_scale']
         self.daq_device = daq_device
 
         # Possible curves
@@ -461,7 +465,7 @@ class BeamPositionPlot(pg.PlotWidget):
         # Get plot item and setup
         self.plt = self.getPlotItem()
         self.plt.setDownsampling(auto=True)
-        self.plt.setTitle('' if self.daq_device is None else self.daq_device)
+        self.plt.setTitle(type(self).__name__ if self.daq_device is None else type(self).__name__ + ' ' + self.daq_device)
         self.plt.setLabel('left', text='Vertical displacement', units='V')
         self.plt.setLabel('bottom', text='Horizontal displacement', units='V')
         self.plt.showGrid(x=True, y=True, alpha=0.66)
