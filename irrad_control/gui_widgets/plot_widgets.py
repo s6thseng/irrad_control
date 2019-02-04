@@ -3,6 +3,7 @@ import pyqtgraph as pg
 import numpy as np
 from PyQt5 import QtWidgets, QtCore, QtGui
 from collections import OrderedDict
+from irrad_control import roe_output
 
 # Matplotlib first 8 default colors
 MPL_COLORS = [(31, 119, 180), (255, 127, 14), (44, 160, 44), (214, 39, 40),
@@ -135,7 +136,44 @@ class PlotWrapperWidget(QtWidgets.QWidget):
         pw.show()
 
 
-class ScrollingIrradDataPlot(pg.PlotWidget):
+class IrradPlotWidget(pg.PlotWidget):
+    """Base class for plot widgets"""
+
+    def __init__(self, parent=None):
+        super(IrradPlotWidget, self).__init__(parent)
+
+        self.curves = None
+
+    def _setup_plot(self):
+        raise NotImplementedError('Please implement a _setup_plot method')
+
+    def set_data(self):
+        raise NotImplementedError('Please implement a set_data method')
+
+    def show_data(self, curve=None, show=True):
+        """Show/hide the data of curve in PlotItem. If *curve* is None, all curves are shown/hidden."""
+
+        if not self.curves:
+            raise NotImplementedError("Please define the attribute dict 'curves' and fill it with curves")
+
+        if curve is not None and curve not in self.curves:
+            logging.error('{} data not in graph. Current graphs: {}'.format(curve, ','.join(self.curves.keys())))
+            return
+
+        _curves = [curve] if curve is not None else self.curves.keys()
+
+        for _cu in _curves:
+            if show:
+                if not isinstance(self.curves[_cu], pg.InfiniteLine):
+                    self.legend.addItem(self.curves[_cu], _cu)
+                self.plt.addItem(self.curves[_cu])
+            else:
+                if not isinstance(self.curves[_cu], pg.InfiniteLine):
+                    self.legend.removeItem(_cu)
+                self.plt.removeItem(self.curves[_cu])
+
+
+class ScrollingIrradDataPlot(IrradPlotWidget):
     """PlotWidget which displays a set of irradiation data curves over time"""
 
     def __init__(self, channels, ro_scale=None, units=None, period=60, name=None, parent=None):
@@ -190,23 +228,6 @@ class ScrollingIrradDataPlot(pg.PlotWidget):
         # Show data and legend
         for ch in self.channels:
             self.show_data(ch)
-
-    def show_data(self, curve=None, show=True):
-        """Show/hide the data of curve in PlotItem. If *curve* is None, all curves are shown/hidden."""
-
-        if curve is not None and curve not in self.curves:
-            logging.error('{} data not in graph. Current graphs: {}'.format(curve, ','.join(self.curves.keys())))
-            return
-
-        _curves = [curve] if curve is not None else self.curves.keys()
-
-        for _cu in _curves:
-            if show:
-                self.legend.addItem(self.curves[_cu], _cu)
-                self.plt.addItem(self.curves[_cu])
-            else:
-                self.legend.removeItem(_cu)
-                self.plt.removeItem(self.curves[_cu])
 
     def set_data(self, data):
         """Set the data of the plot. Input data is data plus meta data"""
@@ -353,9 +374,16 @@ class BeamCurrentPlot(ScrollingIrradDataPlot):
 
 
 class BeamPositionItem:
-    """This class implements three pyqtgraph items in order to display a rectile with a circle in its intersection."""
+    """This class implements three pyqtgraph items in order to display a reticle with a circle in its intersection."""
 
-    def __init__(self, color, name, intersect_symbol=None):
+    def __init__(self, color, name, intersect_symbol=None, horizontal=True, vertical=True):
+
+        if not horizontal and not vertical:
+            raise ValueError('At least one of horizontal or vertical beam position must be true!')
+
+        # Whether to show horizontal and vertical lines
+        self.horizontal = horizontal
+        self.vertical = vertical
 
         # Init items needed
         self.h_shift_line = pg.InfiniteLine(angle=90)
@@ -371,19 +399,39 @@ class BeamPositionItem:
         self.intersect.setSize(10)
 
         # Items
-        self.items = [self.h_shift_line, self.v_shift_line,self.intersect]
+        self.items = []
+
+        # Add the respective lines
+        if self.horizontal and self.vertical:
+            self.items = [self.intersect, self.h_shift_line, self.v_shift_line]
+        elif self.horizontal:
+            self.items.append(self.h_shift_line)
+        else:
+            self.items.append(self.v_shift_line)
+
         self.legend = None
         self.plotitem = None
         self.name = name
 
-    def set_position(self, x, y):
+    def set_position(self, x=None, y=None):
 
-        _x = x if x is not None else self.h_shift_line.value()
-        _y = y if y is not None else self.v_shift_line.value()
+        if x is None and y is None:
+            raise ValueError('Either x or y position have to be given!')
 
-        self.h_shift_line.setValue(_x)
-        self.v_shift_line.setValue(_y)
-        self.intersect.setData([_x], [_y])
+        if self.horizontal:
+            _x = x if x is not None else self.h_shift_line.value()
+
+        if self.vertical:
+            _y = y if y is not None else self.v_shift_line.value()
+
+        if self.horizontal and self.vertical:
+            self.h_shift_line.setValue(_x)
+            self.v_shift_line.setValue(_y)
+            self.intersect.setData([_x], [_y])
+        elif self.horizontal:
+            self.h_shift_line.setValue(_x)
+        else:
+            self.v_shift_line.setValue(_y)
 
     def set_plotitem(self, plotitem):
         self.plotitem = plotitem
@@ -457,6 +505,15 @@ class BeamPositionPlot(pg.PlotWidget):
         self.d_pos = 'digital_pos'
         self.a_pos = 'analog_pos'
 
+        # Bools
+        self.d_pos_h = False
+        self.d_pos_v = False
+        self.a_pos_h = False
+        self.a_pos_v = False
+
+        # Get indices
+        self._type_indices = dict([(x, self.ro_types.index(x)) for x in roe_output if x in self.ro_types])
+
         # Setup the main plot
         self._setup_plot()
 
@@ -479,12 +536,30 @@ class BeamPositionPlot(pg.PlotWidget):
 
         self.curves = OrderedDict()
 
-        # Check which channel types are present and fill curves
+        # Check which channel types are present and create curves
         if all(t in self.ro_types for t in ('sem_left', 'sem_right', 'sem_up', 'sem_down')):
+            self.d_pos_h = self.d_pos_v = True
             self.curves[self.d_pos] = BeamPositionItem(color=MPL_COLORS[0], name=self.d_pos)
 
+        elif all(t in self.ro_types for t in ('sem_left', 'sem_right')):
+            self.d_pos_h = True
+            self.curves[self.d_pos] = BeamPositionItem(color=MPL_COLORS[0], name=self.d_pos, vertical=False)
+
+        elif all(t in self.ro_types for t in ('sem_up', 'sem_down')):
+            self.d_pos_v = True
+            self.curves[self.d_pos] = BeamPositionItem(color=MPL_COLORS[0], name=self.d_pos, horizontal=False)
+
         if all(t in self.ro_types for t in ('sem_h_shift', 'sem_v_shift')):
+            self.a_pos_h = self.a_pos_v = True
             self.curves[self.a_pos] = BeamPositionItem(color=MPL_COLORS[1], name=self.a_pos)
+
+        elif 'sem_h_shift' in self.ro_types:
+            self.a_pos_h = True
+            self.curves[self.a_pos] = BeamPositionItem(color=MPL_COLORS[1], name=self.a_pos, vertical=False)
+
+        elif 'sem_v_shift' in self.ro_types:
+            self.a_pos_v = True
+            self.curves[self.a_pos] = BeamPositionItem(color=MPL_COLORS[1], name=self.a_pos, horizontal=False)
 
         # Show data and legend
         if self.curves:
@@ -498,19 +573,28 @@ class BeamPositionPlot(pg.PlotWidget):
         # Meta data and data
         _meta, _data = data['meta'], data['data']
 
-        if self.d_pos in self.curves:
-            # Get indices
-            l, r, u, d = (self.ro_types.index(x) for x in ('sem_left', 'sem_right', 'sem_up', 'sem_down'))
+        h_shift = v_shift = None
 
-            h_shift = self._calc_shift(_data[self.channels[l]], _data[self.channels[r]], m='h')
-            v_shift = self._calc_shift(_data[self.channels[u]], _data[self.channels[d]], m='v')
+        if self.d_pos in self.curves:
+
+            if self.d_pos_h:
+                l, r = self._type_indices['sem_left'], self._type_indices['sem_right']
+                h_shift = self._calc_shift(_data[self.channels[l]], _data[self.channels[r]], m='h')
+
+            if self.d_pos_v:
+                u, d = self._type_indices['sem_up'], self._type_indices['sem_down']
+                v_shift = self._calc_shift(_data[self.channels[u]], _data[self.channels[d]], m='v')
 
             self.curves[self.d_pos].set_position(h_shift, v_shift)
 
         if self.a_pos in self.curves:
-            # Get indices
-            h, v = (self.ro_types.index(x) for x in ('sem_h_shift', 'sem_v_shift'))
-            h_shift, v_shift = _data[self.channels[h]], _data[self.channels[v]]
+
+            if self.a_pos_h:
+                h_shift = _data[self.channels[self._type_indices['sem_h_shift']]]
+
+            if self.a_pos_v:
+                v_shift = _data[self.channels[self._type_indices['sem_v_shift']]]
+
             self.curves[self.a_pos].set_position(h_shift, v_shift)
 
     def _calc_shift(self, a, b, m='h'):
@@ -540,6 +624,72 @@ class BeamPositionPlot(pg.PlotWidget):
             else:
                 self.curves[_cu].remove_from_plot()
                 self.curves[_cu].remove_from_legend()
+
+
+class FluenceHist(IrradPlotWidget):
+    """
+        Plot for displaying the beam position. The position is displayed from analog and digital data if available.
+        """
+
+    def __init__(self, irrad_setup, daq_device=None, parent=None):
+        super(FluenceHist, self).__init__(parent=parent)
+
+        # Init class attributes
+        self.irrad_setup = irrad_setup
+        self.daq_device = daq_device
+
+        # Setup the main plot
+        self._setup_plot()
+
+    def _setup_plot(self):
+
+        # Get plot item and setup
+        self.plt = self.getPlotItem()
+        self.plt.setDownsampling(auto=True)
+        self.plt.setTitle(type(self).__name__ if self.daq_device is None else type(self).__name__ + ' ' + self.daq_device)
+        self.plt.setLabel('left', text='Proton fluence', units='cm^-2')
+        self.plt.setLabel('right', text='Neutron fluence', units='cm^-2')
+        self.plt.setLabel('bottom', text='Scan row')
+        self.plt.getAxis('right').setScale(self.irrad_setup['kappa'])
+        self.plt.getAxis('left').enableAutoSIPrefix(False)
+        self.plt.getAxis('right').enableAutoSIPrefix(False)
+        self.plt.setLimits(xMin=0, xMax=self.irrad_setup['n_rows'], yMin=0)
+        self.legend = pg.LegendItem(offset=(80, 80))
+        self.legend.setParentItem(self.plt)
+
+        # Histogram of fluence per row
+        hist_curve = pg.PlotCurveItem()
+        hist_curve.setFillLevel(0.33)
+        hist_curve.setBrush(pg.mkBrush(color=MPL_COLORS[0]))
+
+        # Horizontal line indication the mean fluence over all rows
+        mean_curve = pg.InfiniteLine(angle=0)
+        mean_curve.setPen(color=MPL_COLORS[1], width=2)
+        self.p_label = pg.InfLineLabel(mean_curve, position=0.2)
+        self.n_label = pg.InfLineLabel(mean_curve, position=0.8)
+
+        self.curves = OrderedDict([('hist', hist_curve), ('mean', mean_curve)])
+
+        # Show data and legend
+        for curve in self.curves:
+            self.show_data(curve)
+
+    def set_data(self, data):
+
+        # Meta data and data
+        _meta, _data = data['meta'], data['data']
+
+        fluence = data['data']['fluence']['hist']
+        mean = data['data']['fluence']['mean']
+        std = data['data']['fluence']['std']
+
+        self.curves['hist'].setData(fluence, stepMode=True)
+        self.curves['mean'].setValue(mean)
+
+        p_label = 'Mean: ({:.2E} +- {:.2E}) protons / cm^2'.format(mean, std)
+        self.p_label.setFormat(p_label)
+        n_label = 'Mean: ({:.2E} +- {:.2E}) neq / cm^2'.format((x * self.irrad_setup['kappa'] for x in (mean, std)))
+        self.n_label.setFormat(n_label)
 
 
 class FluenceMap(pg.ViewBox):

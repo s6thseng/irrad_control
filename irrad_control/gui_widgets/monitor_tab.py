@@ -1,6 +1,6 @@
 from PyQt5 import QtCore, QtWidgets
 from collections import OrderedDict
-from irrad_control.gui_widgets.plot_widgets import RawDataPlot, BeamPositionPlot, PlotWrapperWidget, BeamCurrentPlot
+from irrad_control.gui_widgets.plot_widgets import RawDataPlot, BeamPositionPlot, PlotWrapperWidget, BeamCurrentPlot, FluenceHist
 
 
 class IrradMonitor(QtWidgets.QWidget):
@@ -11,7 +11,7 @@ class IrradMonitor(QtWidgets.QWidget):
 
         self.daq_setup = daq_setup
 
-        self.monitors = ('raw', 'interpreted')
+        self.monitors = ('raw', 'beam', 'fluence')
 
         self.daq_tabs = QtWidgets.QTabWidget()
 
@@ -34,22 +34,29 @@ class IrradMonitor(QtWidgets.QWidget):
             for monitor in self.monitors:
 
                 if monitor == 'raw':
+
+                    self.plots[adc]['raw_plot'] = RawDataPlot(self.daq_setup[adc], daq_device=adc)
+
+                    monitor_widget = PlotWrapperWidget(self.plots[adc]['raw_plot'])
+
+                elif monitor == 'beam':
+
                     monitor_widget = QtWidgets.QSplitter()
                     monitor_widget.setOrientation(QtCore.Qt.Horizontal)
                     monitor_widget.setChildrenCollapsible(False)
 
-                    self.plots[adc]['raw_plot'] = RawDataPlot(self.daq_setup[adc], daq_device=adc)
+                    self.plots[adc]['current_plot'] = BeamCurrentPlot(daq_device=adc)
                     self.plots[adc]['pos_plot'] = BeamPositionPlot(self.daq_setup[adc], daq_device=adc)
 
-                    raw_wrapper = PlotWrapperWidget(self.plots[adc]['raw_plot'])
-                    pos_wrapper = PlotWrapperWidget(self.plots[adc]['pos_plot'])
+                    beam_current_wrapper = PlotWrapperWidget(self.plots[adc]['current_plot'])
+                    beam_pos_wrapper = PlotWrapperWidget(self.plots[adc]['pos_plot'])
 
-                    monitor_widget.addWidget(raw_wrapper)
-                    monitor_widget.addWidget(pos_wrapper)
-                elif monitor == 'interpreted':
+                    monitor_widget.addWidget(beam_current_wrapper)
+                    monitor_widget.addWidget(beam_pos_wrapper)
 
-                    self.plots[adc]['current_plot'] = BeamCurrentPlot(daq_device=adc)
-                    monitor_widget = PlotWrapperWidget(self.plots[adc]['current_plot'])
+                elif monitor == 'fluence':
+                    self.plots[adc]['fluence_plot'] = FluenceHist(irrad_setup={'n_rows': 50, 'kappa': 3})
+                    monitor_widget = PlotWrapperWidget(self.plots[adc]['fluence_plot'])
 
                 monitor_tabs.addTab(monitor_widget, monitor.capitalize())
 

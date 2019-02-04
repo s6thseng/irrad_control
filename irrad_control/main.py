@@ -300,13 +300,24 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
             self.daq_info_widget.update_data(data)
 
-            for plot in self.monitor_tab.plots[adc]:
-                if plot != 'current_plot':
-                    self.monitor_tab.plots[adc][plot].set_data(data)
+            self.monitor_tab.plots[adc]['raw_plot'].set_data(data)
+            self.monitor_tab.plots[adc]['pos_plot'].set_data(data)
 
             # TODO: Only log data when specified in control tab
             # if self.control_tab.log_data:
             self._log_data(data)
+
+        # Check whether data is interpreted
+        elif data['meta']['type'] == 'beam':
+
+            self.monitor_tab.plots[adc]['current_plot'].set_data(data)
+
+        # Check whether data is interpreted
+        elif data['meta']['type'] == 'fluence':
+            self.monitor_tab.plots[adc]['fluence_plot'].set_data(data)
+
+
+
             
     def send_cmd(self, target, cmd, cmd_data=None):
         """Send a command *cmd* to a target *target* running within the server or interpreter process.
