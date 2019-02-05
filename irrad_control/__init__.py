@@ -38,3 +38,7 @@ with open(os.path.join(config_path, 'server_ips.yaml'), 'r') as si:
 # Proportionality constants between SEM signal and proton beam current
 with open(os.path.join(config_path, 'proportionality_constants.yaml'), 'r') as pc:
     proportionality_constants = yaml.safe_load(pc)
+
+# Proton hardness factors
+with open(os.path.join(config_path, 'hardness_factors.yaml'), 'r') as hf:
+    hardness_factors = yaml.safe_load(hf)
