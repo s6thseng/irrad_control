@@ -26,6 +26,9 @@ class DaqInfoWidget(QtWidgets.QWidget):
         self.refresh_timestamp = {}
         self.data_timestamp = {}
 
+        # Beam current values
+        self._beam_current_vals = {}
+
         # Check number of DAQ ADCs
         for adc in self.adcs:
             self.channels[adc] = self.daq_setup[adc]['channels']
@@ -67,6 +70,7 @@ class DaqInfoWidget(QtWidgets.QWidget):
         self.sampling_rate_labels = {}
         self.num_avg_labels = {}
         self.full_scale_labels = {}
+        self.beam_current_labels = {}
 
         # Loop over all ADCs
         for adc in self.adcs:
@@ -91,6 +95,7 @@ class DaqInfoWidget(QtWidgets.QWidget):
             self.sampling_rate_labels[adc] = QtWidgets.QLabel('Sampling rate: %s sps' % _srate_lbl)
             self.num_avg_labels[adc] = QtWidgets.QLabel('Averages: %s' % _avgs_lbl)
             self.full_scale_labels[adc] = QtWidgets.QLabel('5V full-scale: %s' % _ro_lbl)
+            self.beam_current_labels[adc] = QtWidgets.QLabel('0 nA')
 
             # Tooltips of labels
             self.data_rate_labels[adc].setToolTip('Rate of incoming data of respective ADC')
@@ -123,6 +128,9 @@ class DaqInfoWidget(QtWidgets.QWidget):
             volt_rb.toggled.connect(lambda v, x=adc: self.update_unit(v, x, volt_rb.text()))
             ampere_rb.toggled.connect(lambda v, x=adc: self.update_unit(v, x, ampere_rb.text()))
 
+            # Beam current label
+            current_label = QtWidgets.QLabel('Beam current:')
+
             # Add to layout
             info_layout.addWidget(self.data_rate_labels[adc], 0, 0, 1, 1)
             info_layout.addWidget(self.sampling_rate_labels[adc], 1, 0, 1, 1)
@@ -130,11 +138,14 @@ class DaqInfoWidget(QtWidgets.QWidget):
             info_layout.addWidget(self.num_avg_labels[adc], 0, 2, 1, 1)
             info_layout.addWidget(self.full_scale_labels[adc], 1, 2, 1, 1)
             info_layout.addItem(QtWidgets.QSpacerItem(self.h_space, 0), 0, 3, 1, 2)
-            info_layout.addWidget(unit_label, 0, 4, 1 ,2)
-            info_layout.addWidget(volt_rb, 1, 4, 1 ,1)
-            info_layout.addWidget(ampere_rb, 1, 5, 1, 1)
-            info_layout.addWidget(digit_spinbox, 0, 6, 1, 1)
-            info_layout.addWidget(interval_spinbox, 1, 6, 1, 1)
+            info_layout.addWidget(current_label, 0, 4, 1, 1)
+            info_layout.addWidget(self.beam_current_labels[adc], 1, 4, 1, 1)
+            info_layout.addItem(QtWidgets.QSpacerItem(self.h_space, 0), 0, 5, 1, 2)
+            info_layout.addWidget(unit_label, 0, 6, 1 , 1)
+            info_layout.addWidget(volt_rb, 0, 7, 1 ,1)
+            info_layout.addWidget(ampere_rb, 1, 7, 1, 1)
+            info_layout.addWidget(digit_spinbox, 0, 8, 1, 1)
+            info_layout.addWidget(interval_spinbox, 1, 8, 1, 1)
             tab_layout.addLayout(info_layout)
 
             # Layout for table area
@@ -226,25 +237,7 @@ class DaqInfoWidget(QtWidgets.QWidget):
 
         return total_tables
 
-    def _update_tables(self, ch_data=None):
-        """Helper func to update all tables at once"""
-        for adc in self.adcs:
-            self.update_table(adc, ch_data=ch_data)
-
-    def update_digits(self, adc, digits):
-        """Update the digits to display in table data"""
-        self.n_digits[adc] = digits
-        self._update_tables()
-
-    def update_interval(self, adc, interval):
-        """Update the data rate label"""
-        self.refresh_interval[adc] = interval
-
-    def update_unit(self, v, adc, unit):
-        self.unit[adc] = unit if v else self.unit[adc]
-        self._update_tables()
-
-    def update_data(self, data):
+    def update_raw_data(self, data):
         """Function handling incoming data and updating table widgets"""
 
         # Extract meta data and actual data
@@ -265,6 +258,12 @@ class DaqInfoWidget(QtWidgets.QWidget):
         if refresh_time >= self.refresh_interval[adc] or self.refresh_interval[adc] == 0:
             self.update_drate(adc=adc, drate=drate)
             self.update_table(adc=adc, ch_data=channel_data)
+
+            # Update latest value of beam current
+            if adc in self._beam_current_vals:
+                self.beam_current_labels[adc].setText('{:.2f} nA'.format(self._beam_current_vals[adc]))
+
+            # Update refresh timestamp
             self.refresh_timestamp[adc] = timestamp
 
     def update_table(self, adc, ch_data=None):
@@ -284,6 +283,28 @@ class DaqInfoWidget(QtWidgets.QWidget):
                 else:
                     if data_header in ch_data:
                         table.item(0, i).setText(format(self._calc(adc, ch_data[data_header]), '.{}f'.format(self.n_digits[adc])))
+
+    def _update_tables(self, ch_data=None):
+        """Helper func to update all tables at once"""
+        for adc in self.adcs:
+            self.update_table(adc, ch_data=ch_data)
+
+    def update_beam_current(self, beam_data):
+        adc, actual_data = beam_data['meta']['name'], beam_data['data']
+        self._beam_current_vals[adc] = actual_data['current']['analog']
+
+    def update_digits(self, adc, digits):
+        """Update the digits to display in table data"""
+        self.n_digits[adc] = digits
+        self._update_tables()
+
+    def update_interval(self, adc, interval):
+        """Update the data rate label"""
+        self.refresh_interval[adc] = interval
+
+    def update_unit(self, v, adc, unit):
+        self.unit[adc] = unit if v else self.unit[adc]
+        self._update_tables()
 
     def update_drate(self, adc, drate):
         """Update the data rate label"""
