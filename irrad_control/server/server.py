@@ -5,20 +5,10 @@ import multiprocessing
 import threading
 import logging
 import psutil
-from collections import OrderedDict
 from zmq.log import handlers
 from adc.ADS1256_definitions import *
+from adc.ADS1256_drates import ads1256_drates
 from adc.pipyadc import ADS1256
-
-
-# ADS1256 data rates and number of averages per data rate
-ads1256 = OrderedDict()
-
-# Data rate in samples per second
-ads1256_drates = OrderedDict([(30000, DRATE_30000), (15000, DRATE_15000), (7500, DRATE_7500), (3750, DRATE_3750),
-                              (2000, DRATE_2000), (1000, DRATE_1000), (500, DRATE_500), (100, DRATE_100),
-                              (60, DRATE_60), (50, DRATE_50), (30, DRATE_30), (25, DRATE_25),
-                              (15, DRATE_15), (10, DRATE_10), (5, DRATE_5), (2.5, DRATE_2_5)])
 
 
 class IrradServer(multiprocessing.Process):
@@ -26,14 +16,11 @@ class IrradServer(multiprocessing.Process):
 
     def __init__(self, cmd_port):
         super(IrradServer, self).__init__()
-        
-        # Process info
-        self.process = psutil.Process(self.ident)
 
-        # Attributes to handle sending data, receiving and handling commands
-        self.send_data = True
-        self.recv_cmds = True
-        self.busy_cmd = False
+        # Attributes for internal handling of sending data, receiving and commands
+        self._send_data = True
+        self._recv_cmds = True
+        self._busy_cmd = False
 
         # Command port to bind to
         self.cmd_port = cmd_port
@@ -41,9 +28,15 @@ class IrradServer(multiprocessing.Process):
         # Init zmq related attributes
         self.server_rep = None
         self.context = None
+
+        # Process interface
+        self.process = psutil.Process(self.ident)
+
+        # Attribute to hold beam current; needed for XY-Stage as scan criteria
+        self.beam_current = None
         
-        # List of known commands
-        self.cmds = ['setup_server']
+        # Dict of known commands
+        self.commands = {'server': ['start'], 'adc': [], 'stage': []}
 
         # Attribute to store setup in
         self.irrad_setup = None
@@ -51,27 +44,6 @@ class IrradServer(multiprocessing.Process):
     def _tcp_addr(self, port, ip='*'):
         """Creates string of complete tcp address which sockets can bind to"""
         return 'tcp://{}:{}'.format(ip, port)
-        
-    def _setup_server(self, irrad_setup):
-        """Sets up the server process"""
-
-        # Update setup
-        self.irrad_setup = irrad_setup
-
-        # Extract info and sub setups
-        self.adc_name = irrad_setup['daq'].keys()[0]
-        self.daq_setup = irrad_setup['daq'][self.adc_name]
-        self.tcp_setup = irrad_setup['tcp']
-        
-        # Setup logging
-        self._setup_logging()
-        
-        # Setup adc
-        self._setup_adc()
-
-        # Start data sending thread
-        data_thread = threading.Thread(target=self.output_data)
-        data_thread.start()
 
     def _setup_logging(self):
         """Setup logging"""
@@ -94,47 +66,45 @@ class IrradServer(multiprocessing.Process):
         
     def _setup_adc(self):
         """Setup the ADS1256 instance and channels"""
-        
+
+        # Instance of ADS1256 ADC on WaveShare board
         self.adc = ADS1256()
+
+        # Set initial data rate from DAQ setup
         self.adc.drate = ads1256_drates[self.daq_setup['sampling_rate']]
         
-        # self-calibration
+        # Calibrate the ADC before DAQ
         self.adc.cal_self()
     
-        # channels TODO: represent not only positive channels
+        # Declare all available channels of the ADS1256
         self._all_channels = [ch_i | NEG_AINCOM for ch_i in (POS_AIN0, POS_AIN1, POS_AIN2, POS_AIN3,
                                                              POS_AIN4, POS_AIN5, POS_AIN6, POS_AIN7)]
-        
+
+        # Assign the physical channel numbers e.g. multiplexer address
         self.adc_channels = [self._all_channels[i] for i in self.daq_setup['ch_numbers']]
-        
-    def recv_cmd(self):
-        """Receiving commands at self._cmd_port"""
 
-        # Receive commands as long as self.recv_cmds is True
-        while self.recv_cmds:
+    def _start_server(self, irrad_setup):
+        """Sets up the server process"""
 
-            if not self.busy_cmd:
-                # Cmd must be dict with command as 'cmd' key and 'args', 'kwargs' keys
-                cmd_dict = self.server_rep.recv_json()
+        # Update setup
+        self.irrad_setup = irrad_setup
 
-                # Set cmd to busy; other commands send will be queued and received later
-                self.busy_cmd = True
+        # Extract info and sub setups
+        self.adc_name = irrad_setup['daq'].keys()[0]
+        self.daq_setup = irrad_setup['daq'][self.adc_name]
+        self.tcp_setup = irrad_setup['tcp']
 
-                if 'cmd' not in cmd_dict:
-                    logging.error("Command must be dictionary with actual command in cmd_dict['cmd']!")
-                    self.server_rep.send_json({'reply': 'Error', 'sender': 'server'})
-                    self.busy_cmd = False
-                    continue
-                elif cmd_dict['cmd'] not in self.cmds:
-                    logging.error("Command {} not listed in commands: {}".format(cmd_dict['cmd'],
-                                                                                 ', '.join(str(x) for x in self.cmds)))
-                    self.server_rep.send_json({'reply': 'Error', 'sender': 'server'})
-                    self.busy_cmd = False
-                    continue
+        # Setup logging
+        self._setup_logging()
 
-                self.handle_cmd(cmd_dict)
-        
-    def output_data(self):
+        # Setup adc
+        self._setup_adc()
+
+        # Start data sending thread
+        data_thread = threading.Thread(target=self.send_data)
+        data_thread.start()
+
+    def send_data(self):
         """Sends data from dedicated thread"""
 
         # Needs to be specified within this func since its run on dedicated thread
@@ -143,7 +113,7 @@ class IrradServer(multiprocessing.Process):
         data_pub.bind(self._tcp_addr(self.tcp_setup['port']['data']))
 
         # Send data als long as specified
-        while self.send_data:
+        while self._send_data:
 
             # Read raw data from ADC
             raw_data = self.adc.read_sequence(self.adc_channels)
@@ -155,29 +125,83 @@ class IrradServer(multiprocessing.Process):
             # Send
             data_pub.send_json({'meta': _meta, 'data': _data})
 
-    def handle_cmd(self, cmd_dict):
-        """Handle all commands. After every command a reply must be send."""
+    def _send_reply(self, reply, _type, sender, data=None):
 
-        cmd = cmd_dict['cmd']
-        cmd_data = None if 'data' not in cmd_dict else cmd_dict['data']
+        reply_dict = {'reply': reply, 'type': _type, 'sender': sender}
 
-        if cmd == 'setup_server':
-            self._setup_server(cmd_data)
-            self.server_rep.send_json({'reply': 'server_pid', 'data': self.ident, 'sender': 'server'})
+        if data is not None:
+            reply_dict['data'] = data
 
-        if cmd == 'herro':
-            self.server_rep.send_json({'reply': 'Herro', 'sender': 'server'})
-
-        # Set busy False after executed cmd
-        self.busy_cmd = False
-
-    def run(self):
-        # Create context; thread safe, sockets though have to be created within the respective thread
-        self.context = zmq.Context()
+        self.server_rep.send_json(reply_dict)
+        
+    def recv_cmd(self):
+        """Receiving commands at self.cmd_port.
+        This is the main function which will be executed within the run-method"""
 
         # Create server socket and bind to cmd port
         self.server_rep = self.context.socket(zmq.REP)
         self.server_rep.bind(self._tcp_addr(self.cmd_port))
+
+        # Receive commands as long as self._recv_cmds is True
+        while self._recv_cmds:
+
+            # Check if were working on a command. We have to work sequentially
+            if not self._busy_cmd:
+
+                # Cmd must be dict with command as 'cmd' key and 'args', 'kwargs' keys
+                cmd_dict = self.server_rep.recv_json()
+
+                # Set cmd to busy; other commands send will be queued and received later
+                self._busy_cmd = True
+
+                # Extract info from cmd_dict
+                target = cmd_dict['target']
+                cmd = cmd_dict['cmd']
+                cmd_data = None if 'data' not in cmd_dict else cmd_dict['data']
+
+                # Containers for errors
+                error_reply = False
+
+                # Command sanity checks
+                if target not in self.commands:
+                    msg = "Target '{}' unknown. Known targets are {}!".format(', '.join(self.commands.keys()), target)
+                    logging.error(msg)
+                    error_reply = 'No server target named {}'.format(target)
+
+                elif cmd not in self.commands[target]:
+                    msg = "Target command '{}' unknown. Known commands are {}!".format(', '.join(self.commands[target]),
+                                                                                       cmd)
+                    logging.error(msg)
+                    error_reply = 'No target command named {}'.format(cmd)
+
+                # Check for errors
+                if error_reply:
+                    self._send_reply(reply=error_reply, sender='server', _type='ERROR', data=None)
+                    self._busy_cmd = False
+                else:
+                    self.handle_cmd(target=target, cmd=cmd, cmd_data=cmd_data)
+
+    def handle_cmd(self, target, cmd, cmd_data):
+        """Handle all commands. After every command a reply must be send."""
+
+        # Handle server commands
+        if target == 'server':
+
+            if cmd == 'start':
+
+                # Start server with setup which is cmd data
+                self._start_server(cmd_data)
+
+                # Send reply which is PID of this process
+                self._send_reply(reply='pid', data=self.ident, sender='server', _type='STANDARD')
+
+        # Set busy False after executed cmd
+        self._busy_cmd = False
+
+    def run(self):
+
+        # Create context; needs to be within run(); sockets have to be created within the respective thread
+        self.context = zmq.Context()
         
         # Main process runs command receive loop
         self.recv_cmd()
