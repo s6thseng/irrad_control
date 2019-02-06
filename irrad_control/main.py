@@ -16,6 +16,7 @@ from irrad_control.utils.server_manager import ServerManager
 from irrad_control.gui_widgets.daq_info_widget import DaqInfoWidget
 from irrad_control.gui_widgets.monitor_tab import IrradMonitor
 from irrad_control.gui_widgets.setup_tab import IrradSetup
+from irrad_control.interpreter import IrradInterpreter
 
 
 PROJECT_NAME = 'Irrad Control'
@@ -59,8 +60,11 @@ class IrradControlWin(QtWidgets.QMainWindow):
         # QThreadPool manages GUI threads on its own; every runnable started via start(runnable) is auto-deleted after.
         self.threadpool = QtCore.QThreadPool()
 
-        # Processes and hardware that can receive commands using self.send_cmd method
-        self.cmd_targets = ('server', 'interpreter')
+        # Server process and hardware that can receive commands using self.send_cmd method
+        self.server_targets = ('server', 'adc', 'stage')
+
+        # Interpreter process
+        self.interpreter = None
         
         # Connect signals
         self.data_received.connect(lambda data: self.handle_data(data))
@@ -167,11 +171,25 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         # Store setup
         self.setup = setup
+
+        # Update tab widgets accordingly
         self.update_tabs()
+
+        # Init daq info widget
         self._init_daq_dock()
-        self._init_server()
+
+        # Start logging data
         self._init_data_log()
+
+        # Start receiving data and log
         self._init_threads()
+
+        # Init server
+        self._init_server()
+
+        # Init interpreter
+        self.interpreter = IrradInterpreter(irrad_setup=setup)
+        self.interpreter.start()
 
     def _init_log_dock(self):
         """Initializes corresponding log dock"""
@@ -235,7 +253,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         # Connect server preparation workers finished signal to launch server process
         for connection in [lambda: self.server.start_server_process(self.setup['tcp']['port']['cmd']),
-                           lambda: self.send_cmd(target='server', cmd='setup_server', cmd_data=self.setup)]:
+                           lambda: self.send_cmd(target='server', cmd='start', cmd_data=self.setup)]:
             server_prep_worker.signals.finished.connect(connection)
 
         self.threadpool.start(server_prep_worker)
@@ -298,7 +316,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         # Check whether data is interpreted
         if data['meta']['type'] == 'raw':
 
-            self.daq_info_widget.update_data(data)
+            self.daq_info_widget.update_raw_data(data)
 
             self.monitor_tab.plots[adc]['raw_plot'].set_data(data)
             self.monitor_tab.plots[adc]['pos_plot'].set_data(data)
@@ -309,22 +327,19 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         # Check whether data is interpreted
         elif data['meta']['type'] == 'beam':
-
-            self.monitor_tab.plots[adc]['current_plot'].set_data(data)
+            self.daq_info_widget.update_beam_current(data)
+            #self.monitor_tab.plots[adc]['current_plot'].set_data(data)
 
         # Check whether data is interpreted
         elif data['meta']['type'] == 'fluence':
             self.monitor_tab.plots[adc]['fluence_plot'].set_data(data)
-
-
-
             
     def send_cmd(self, target, cmd, cmd_data=None):
         """Send a command *cmd* to a target *target* running within the server or interpreter process.
         The command can have respective data *cmd_data*. Targets must be listed in self.server_targets."""
 
-        if target not in self.cmd_targets:
-            msg = '{} not in known by command targets. Known targets: {}'.format(target, ', '.join(self.cmd_targets))
+        if target not in self.server_targets:
+            msg = '{} not in known by command targets. Known targets: {}'.format(target, ', '.join(self.server_targets))
             logging.error(msg)
             return
 
@@ -338,8 +353,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         # Spawn socket to send request to server and connect
         server_req = self.context.socket(zmq.REQ)
-        server_req.connect(self._tcp_addr(self.setup['tcp']['port']['cmd'],
-                                          self.setup['tcp']['ip']['server'] if cmd_dict['target'] == 'server' else '*'))
+        server_req.connect(self._tcp_addr(self.setup['tcp']['port']['cmd'], self.setup['tcp']['ip']['server']))
 
         # Send command dict and wait for reply
         server_req.send_json(cmd_dict)
@@ -349,25 +363,39 @@ class IrradControlWin(QtWidgets.QMainWindow):
         self.reply_received.emit(server_reply)
         server_req.close()
 
-    def handle_reply(self, reply):
-        _reply = reply['reply']
-        _sender = reply['sender']
-        _reply_data = None if 'data' not in reply else reply['data']
+    def handle_reply(self, reply_dict):
 
-        if _reply_data is not None:
+        reply = reply_dict['reply']
+        _type = reply_dict['type']
+        sender = reply_dict['sender']
+        reply_data = None if 'data' not in reply_dict else reply_dict['data']
 
-            if _reply == 'server_pid':
-                self.server.set_server_pid(_reply_data)
-                self.tabs.setCurrentIndex(self.tabs.indexOf(self.monitor_tab))
+        if _type == 'STANDARD':
+
+            if sender == 'server':
+
+                if reply == 'pid':
+
+                    self.server.set_server_pid(reply_data)
+                    self.tabs.setCurrentIndex(self.tabs.indexOf(self.monitor_tab))
+
+        elif _type == 'ERROR':
+            msg = '{} error occured: {}'.format(sender.capitalize(), reply)
+            logging.error(msg)
+            self.log_dock.setVisible(True)
 
         else:
-            logging.info('Received reply {} from {}'.format(_reply, _sender))
+            logging.info('Received reply {} from {}'.format(reply, sender))
 
     def recv_data(self):
         
         # Data subscriber
         data_sub = self.context.socket(zmq.SUB)
-        data_sub.connect(self._tcp_addr(self.setup['tcp']['port']['data'], self.setup['tcp']['ip']['server']))
+
+        # Connect to data from remote server and local interpreter process
+        for ip in (self.setup['tcp']['ip']['server'], 'localhost'):
+            data_sub.connect(self._tcp_addr(self.setup['tcp']['port']['data'], ip=ip))
+
         data_sub.setsockopt(zmq.SUBSCRIBE, '')
         
         data_timestamp = None
@@ -393,7 +421,11 @@ class IrradControlWin(QtWidgets.QMainWindow):
         
         # Log subscriber
         log_sub = self.context.socket(zmq.SUB)
-        log_sub.connect(self._tcp_addr(self.setup['tcp']['port']['log'], ip=self.setup['tcp']['ip']['server']))
+
+        # Connect to log messages from remote server and local interpreter process
+        for ip in (self.setup['tcp']['ip']['server'], 'localhost'):
+            log_sub.connect(self._tcp_addr(self.setup['tcp']['port']['log'], ip=ip))
+
         log_sub.setsockopt(zmq.SUBSCRIBE, '')
         
         logging.info('Log receiver ready')
@@ -401,7 +433,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         while self.receive_log:
             log = log_sub.recv()
             if log:
-                self.log_received.emit(log)
+                self.log_received.emit(log.strip())
 
     def _log_data(self, data):
             
@@ -453,6 +485,9 @@ class IrradControlWin(QtWidgets.QMainWindow):
             
         # Kill server process on host
         self.server.shutdown_server()
+
+        if self.interpreter.is_alive():
+            self.interpreter.terminate()
         
         # Give 1 second to shut everything down
         start = time.time()
