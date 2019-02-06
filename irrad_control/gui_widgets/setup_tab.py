@@ -3,7 +3,8 @@ import os
 import time
 from subprocess import check_output, CalledProcessError
 from PyQt5 import QtWidgets, QtCore
-from irrad_control import roe_output, ro_scales, ads1256, proportionality_constants, server_ips, config_path
+from irrad_control import roe_output, ro_scales, ads1256
+from irrad_control import proportionality_constants, server_ips, hardness_factors, config_path
 from irrad_control.gui_widgets.sub_windows import ZmqSetupWindow
 
 
@@ -202,11 +203,11 @@ class IrradSetup(QtWidgets.QWidget):
         comboboxes = []
 
         # Label for DAQ device
-        label_daq = QtWidgets.QLabel('DAQ device')
+        label_daq = QtWidgets.QLabel('DAQ')
         layout_daq.addWidget(label_daq, 0, 0, 1, 3)
 
         # Label for name of DQA device which is represented by the ADC
-        label_name = QtWidgets.QLabel('Name:')
+        label_name = QtWidgets.QLabel('Device name:')
         label_name.setToolTip('Name of DAQ device e.g. SEM_C')
         edit_name = QtWidgets.QLineEdit()
 
@@ -214,6 +215,7 @@ class IrradSetup(QtWidgets.QWidget):
         for connection in [lambda text: self.daq_widgets['scale_combo'].setEnabled(True if text else False),
                            lambda text: self.daq_widgets['srate_combo'].setEnabled(True if text else False),
                            lambda text: self.daq_widgets['prop_combo'].setEnabled(True if text else False),
+                           lambda text: self.daq_widgets['kappa_combo'].setEnabled(True if text else False),
                            lambda text: [w.setEnabled(True if text else False) for k in ('channel_edits', 'type_combos') for w in self.daq_widgets[k]],
                            lambda _: [w.textChanged.emit(w.text()) for w in self.daq_widgets['channel_edits']]]:
 
@@ -224,32 +226,33 @@ class IrradSetup(QtWidgets.QWidget):
         layout_daq.addWidget(edit_name, 1, 2, 1, 3)
 
         # Label for readout scale combobox
+        label_kappa = QtWidgets.QLabel('Proton hardness factor %s:' % u'\u03ba')
+        combo_kappa = QtWidgets.QComboBox()
+        self._fill_checkbox_items(combo_kappa, hardness_factors)
+
+        # Add to layout
+        layout_daq.addWidget(label_kappa, 2, 1, 1, 1)
+        layout_daq.addWidget(combo_kappa, 2, 2, 1, 3)
+
+        # Label for readout scale combobox
         label_scale = QtWidgets.QLabel('RO electronics 5V full-scale:')
         combo_scale = QtWidgets.QComboBox()
         combo_scale.addItems(ro_scales.keys())
         combo_scale.setEnabled(False)
 
         # Add to layout
-        layout_daq.addWidget(label_scale, 2, 1, 1, 1)
-        layout_daq.addWidget(combo_scale, 2, 2, 1, 3)
+        layout_daq.addWidget(label_scale, 3, 1, 1, 1)
+        layout_daq.addWidget(combo_scale, 3, 2, 1, 3)
 
         # Proportionality constant related widgets
         label_prop = QtWidgets.QLabel('Proportionality constant %s [1/V]:' % u'\u03bb')
         label_prop.setToolTip('Constant translating SEM signal to actual proton beam current via I_Beam = %s * RO_scale * SEM_sig' % u'\u03bb')
         combo_prop = QtWidgets.QComboBox()
-
-        # Add entire Info to tooltip e.g. date of measured constant, sigma, etc.
-        for i, k in enumerate(sorted(proportionality_constants.keys())):
-            combo_prop.insertItem(i, '{} ({})'.format(k, proportionality_constants[k]['nominal']))
-            tool_tip = ''
-            for l in proportionality_constants[k]:
-                tool_tip += '{}: {}\n'.format(l, proportionality_constants[k][l])
-            combo_prop.model().item(i).setToolTip(tool_tip)
-        combo_prop.setEnabled(False)
+        self._fill_checkbox_items(combo_prop, proportionality_constants)
 
         # Add to layout
-        layout_daq.addWidget(label_prop, 3, 1, 1, 1)
-        layout_daq.addWidget(combo_prop, 3, 2, 1, 3)
+        layout_daq.addWidget(label_prop, 4, 1, 1, 1)
+        layout_daq.addWidget(combo_prop, 4, 2, 1, 3)
 
         # Sampling rate related widgets
         label_srate = QtWidgets.QLabel('Sampling rate [sps]:')
@@ -259,8 +262,8 @@ class IrradSetup(QtWidgets.QWidget):
         combo_srate.setEnabled(False)
 
         # Add to layout
-        layout_daq.addWidget(label_srate, 4, 1, 1, 1)
-        layout_daq.addWidget(combo_srate, 4, 2, 1, 3)
+        layout_daq.addWidget(label_srate, 5, 1, 1, 1)
+        layout_daq.addWidget(combo_srate, 5, 2, 1, 3)
 
         # ADC channel related input widgets
         label_channel = QtWidgets.QLabel('ADC channels:')
@@ -272,10 +275,10 @@ class IrradSetup(QtWidgets.QWidget):
         label_type.setToolTip('Type of channel according to the custom readout electronics')
 
         # Add to layout
-        layout_daq.addWidget(label_channel, 5, 1, 1, 1)
-        layout_daq.addWidget(label_channel_number, 5, 2, 1, 1)
-        layout_daq.addWidget(label_channel_name, 5, 3, 1, 1)
-        layout_daq.addWidget(label_type, 5, 4, 1, 1)
+        layout_daq.addWidget(label_channel, 6, 1, 1, 1)
+        layout_daq.addWidget(label_channel_number, 6, 2, 1, 1)
+        layout_daq.addWidget(label_channel_name, 6, 3, 1, 1)
+        layout_daq.addWidget(label_type, 6, 4, 1, 1)
 
         # Loop over number of available ADC channels which is 8.
         # Make combobox for channel type, edit for name and label for physical channel number
@@ -297,12 +300,13 @@ class IrradSetup(QtWidgets.QWidget):
             comboboxes.append(_cbx)
 
             # Add to layout
-            layout_daq.addWidget(QtWidgets.QLabel('{}.'.format(i+1)), i + 6, 2, 1, 1)
-            layout_daq.addWidget(_edit, i + 6, 3, 1, 1)
-            layout_daq.addWidget(_cbx, i + 6, 4, 1, 1)
+            layout_daq.addWidget(QtWidgets.QLabel('{}.'.format(i+1)), i + 7, 2, 1, 1)
+            layout_daq.addWidget(_edit, i + 7, 3, 1, 1)
+            layout_daq.addWidget(_cbx, i + 7, 4, 1, 1)
 
         # Store all input related widgets in dict
         self.daq_widgets['name_edit'] = edit_name
+        self.daq_widgets['kappa_combo'] = combo_kappa
         self.daq_widgets['prop_combo'] = combo_prop
         self.daq_widgets['scale_combo'] = combo_scale
         self.daq_widgets['srate_combo'] = combo_srate
@@ -311,6 +315,17 @@ class IrradSetup(QtWidgets.QWidget):
 
         # Add this widget to right widget
         self.right_layout.addWidget(self.right_widget)
+
+    def _fill_checkbox_items(self, chbx, fill_dict):
+
+        # Add entire Info to tooltip e.g. date of measured constant, sigma, etc.
+        for i, k in enumerate(sorted(fill_dict.keys())):
+            chbx.insertItem(i, '{} ({})'.format(k, fill_dict[k]['nominal']))
+            tool_tip = ''
+            for l in fill_dict[k]:
+                tool_tip += '{}: {}\n'.format(l, fill_dict[k][l])
+            chbx.model().item(i).setToolTip(tool_tip)
+        chbx.setEnabled(False)
 
     def _check_input(self):
         """Check if all necessary input is ready to continue"""
@@ -432,6 +447,10 @@ class IrradSetup(QtWidgets.QWidget):
         tmp_daq['sampling_rate'] = int(self.daq_widgets['srate_combo'].currentText())
 
         tmp_daq['ro_scale'] = ro_scales[self.daq_widgets['scale_combo'].currentText()]
+
+        tmp_daq['prop_constant'] = proportionality_constants[self.daq_widgets['prop_combo'].currentText().split()[0]]['nominal']
+
+        tmp_daq['hardness_factor'] = hardness_factors[self.daq_widgets['kappa_combo'].currentText().split()[0]]['nominal']
 
         self.setup['daq'][self.daq_widgets['name_edit'].text()] = tmp_daq
 
