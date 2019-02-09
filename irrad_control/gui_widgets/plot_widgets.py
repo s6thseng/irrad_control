@@ -3,7 +3,6 @@ import pyqtgraph as pg
 import numpy as np
 from PyQt5 import QtWidgets, QtCore, QtGui
 from collections import OrderedDict
-from irrad_control import roe_output
 
 # Matplotlib first 8 default colors
 MPL_COLORS = [(31, 119, 180), (255, 127, 14), (44, 160, 44), (214, 39, 40),
@@ -367,10 +366,10 @@ class BeamCurrentPlot(ScrollingIrradDataPlot):
                                               name=type(self).__name__ + ('' if daq_device is None else ' ' + daq_device),
                                               parent=parent)
 
-        # Scale in nA
+        self.plt.setLabel('left', text='Beam current', units='A')
         self.plt.hideAxis('left')
         self.plt.showAxis('right')
-        self.plt.getAxis('right').labelUnitPrefix = 'n'
+        self.plt.setLabel('right', text='Beam current', units='A')
 
 
 class BeamPositionItem:
@@ -501,19 +500,6 @@ class BeamPositionPlot(pg.PlotWidget):
         self.ro_scale = daq_setup['ro_scale']
         self.daq_device = daq_device
 
-        # Possible curves
-        self.d_pos = 'digital_pos'
-        self.a_pos = 'analog_pos'
-
-        # Bools
-        self.d_pos_h = False
-        self.d_pos_v = False
-        self.a_pos_h = False
-        self.a_pos_v = False
-
-        # Get indices
-        self._type_indices = dict([(x, self.ro_types.index(x)) for x in roe_output if x in self.ro_types])
-
         # Setup the main plot
         self._setup_plot()
 
@@ -534,33 +520,15 @@ class BeamPositionPlot(pg.PlotWidget):
         self.legend = pg.LegendItem(offset=(80, -50))
         self.legend.setParentItem(self.plt)
 
-        self.curves = OrderedDict()
+        self.curves = OrderedDict([('digital', None), ('analog', None)])
 
-        # Check which channel types are present and create curves
-        if all(t in self.ro_types for t in ('sem_left', 'sem_right', 'sem_up', 'sem_down')):
-            self.d_pos_h = self.d_pos_v = True
-            self.curves[self.d_pos] = BeamPositionItem(color=MPL_COLORS[0], name=self.d_pos)
+    def _init_pos_items(self, data):
 
-        elif all(t in self.ro_types for t in ('sem_left', 'sem_right')):
-            self.d_pos_h = True
-            self.curves[self.d_pos] = BeamPositionItem(color=MPL_COLORS[0], name=self.d_pos, vertical=False)
+        meta, pos_data = data['meta'], data['data']['position']
 
-        elif all(t in self.ro_types for t in ('sem_up', 'sem_down')):
-            self.d_pos_v = True
-            self.curves[self.d_pos] = BeamPositionItem(color=MPL_COLORS[0], name=self.d_pos, horizontal=False)
-
-        if all(t in self.ro_types for t in ('sem_h_shift', 'sem_v_shift')):
-            self.a_pos_h = self.a_pos_v = True
-            self.curves[self.a_pos] = BeamPositionItem(color=MPL_COLORS[1], name=self.a_pos)
-
-        elif 'sem_h_shift' in self.ro_types:
-            self.a_pos_h = True
-            self.curves[self.a_pos] = BeamPositionItem(color=MPL_COLORS[1], name=self.a_pos, vertical=False)
-
-        elif 'sem_v_shift' in self.ro_types:
-            self.a_pos_v = True
-            self.curves[self.a_pos] = BeamPositionItem(color=MPL_COLORS[1], name=self.a_pos, horizontal=False)
-
+        for i, sig in enumerate(pos_data):
+            self.curves[sig] = BeamPositionItem(color=MPL_COLORS[i], name=sig.capitalize() + ' position',
+                                                horizontal='h' in pos_data[sig], vertical='v' in pos_data[sig])
         # Show data and legend
         if self.curves:
             for curve in self.curves:
@@ -570,42 +538,17 @@ class BeamPositionPlot(pg.PlotWidget):
 
     def set_data(self, data):
 
+        # Initialize BeamPositionItems
+        if None in self.curves.values():
+            self._init_pos_items(data)
+
         # Meta data and data
-        _meta, _data = data['meta'], data['data']
+        meta, pos_data = data['meta'], data['data']['position']
 
-        h_shift = v_shift = None
-
-        if self.d_pos in self.curves:
-
-            if self.d_pos_h:
-                l, r = self._type_indices['sem_left'], self._type_indices['sem_right']
-                h_shift = self._calc_shift(_data[self.channels[l]], _data[self.channels[r]], m='h')
-
-            if self.d_pos_v:
-                u, d = self._type_indices['sem_up'], self._type_indices['sem_down']
-                v_shift = self._calc_shift(_data[self.channels[u]], _data[self.channels[d]], m='v')
-
-            self.curves[self.d_pos].set_position(h_shift, v_shift)
-
-        if self.a_pos in self.curves:
-
-            if self.a_pos_h:
-                h_shift = _data[self.channels[self._type_indices['sem_h_shift']]]
-
-            if self.a_pos_v:
-                v_shift = _data[self.channels[self._type_indices['sem_v_shift']]]
-
-            self.curves[self.a_pos].set_position(h_shift, v_shift)
-
-    def _calc_shift(self, a, b, m='h'):
-
-        try:
-            res = (a - b) / (a + b)
-        except ZeroDivisionError:
-            res = None
-
-        # Horizontally, if we are shifted to the left the graph should move to the left, therefore * -1
-        return res if res is None else -1 * res if m == 'h' else res
+        for sig in pos_data:
+            h_shift = None if 'h' not in pos_data[sig] else pos_data[sig]['h']
+            v_shift = None if 'v' not in pos_data[sig] else pos_data[sig]['v']
+            self.curves[sig].set_position(h_shift, v_shift)
 
     def show_data(self, curve=None, show=True):
         """Show/hide the data of channel in PlotItem. If *channel* is None, all curves are shown/hidden."""

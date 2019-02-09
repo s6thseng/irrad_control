@@ -64,7 +64,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         self.server_targets = ('server', 'adc', 'stage')
 
         # Interpreter process
-        self.interpreter = None
+        self.interpreter = IrradInterpreter()
         
         # Connect signals
         self.data_received.connect(lambda data: self.handle_data(data))
@@ -188,7 +188,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         self._init_server()
 
         # Init interpreter
-        self.interpreter = IrradInterpreter(irrad_setup=setup)
+        self.interpreter.update_setup(setup)
         self.interpreter.start()
 
     def _init_log_dock(self):
@@ -319,7 +319,6 @@ class IrradControlWin(QtWidgets.QMainWindow):
             self.daq_info_widget.update_raw_data(data)
 
             self.monitor_tab.plots[adc]['raw_plot'].set_data(data)
-            self.monitor_tab.plots[adc]['pos_plot'].set_data(data)
 
             # TODO: Only log data when specified in control tab
             # if self.control_tab.log_data:
@@ -328,7 +327,9 @@ class IrradControlWin(QtWidgets.QMainWindow):
         # Check whether data is interpreted
         elif data['meta']['type'] == 'beam':
             self.daq_info_widget.update_beam_current(data)
-            #self.monitor_tab.plots[adc]['current_plot'].set_data(data)
+            self.monitor_tab.plots[adc]['pos_plot'].set_data(data)
+            _data = {'meta': data['meta'], 'data': data['data']['current']}
+            self.monitor_tab.plots[adc]['current_plot'].set_data(_data)
 
         # Check whether data is interpreted
         elif data['meta']['type'] == 'fluence':
@@ -398,22 +399,22 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         data_sub.setsockopt(zmq.SUBSCRIBE, '')
         
-        data_timestamp = None
+        data_timestamps = {}
         
         logging.info('Data receiver ready')
         
         while self.receive_data:
             
             data = data_sub.recv_json()
+            dtype = data['meta']['type']
 
-            if data_timestamp is None:
-                data_timestamp = time.time()
+            if dtype not in data_timestamps:
+                data_timestamps[dtype] = time.time()
             else:
-                if data['meta']['type'] == 'raw':
-                    now = time.time()
-                    drate = 1. / (now - data_timestamp)
-                    data_timestamp = now
-                    data['meta']['data_rate'] = drate
+                now = time.time()
+                drate = 1. / (now - data_timestamps[dtype])
+                data_timestamps[dtype] = now
+                data['meta']['data_rate'] = drate
 
             self.data_received.emit(data)
             

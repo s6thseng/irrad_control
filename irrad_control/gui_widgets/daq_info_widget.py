@@ -291,7 +291,7 @@ class DaqInfoWidget(QtWidgets.QWidget):
 
     def update_beam_current(self, beam_data):
         adc, actual_data = beam_data['meta']['name'], beam_data['data']
-        self._beam_current_vals[adc] = actual_data['current']['analog']
+        self._beam_current_vals[adc] = actual_data['current']['analog'] * 1e9
 
     def update_digits(self, adc, digits):
         """Update the digits to display in table data"""
