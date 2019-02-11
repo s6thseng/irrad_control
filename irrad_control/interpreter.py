@@ -124,11 +124,15 @@ class IrradInterpreter(multiprocessing.Process):
         # Beam current
         current_data = {'digital': 0, 'analog': 0}
 
+        # From the digital signal of the SEM foils
+        tmp_dig_vals = []
         for current_type in [('sem_left', 'sem_right'), ('sem_up', 'sem_down')]:
             if all(t in self.ch_type_idx[adc] for t in current_type):
-                tmp_vals = [data[self.channels[adc][self.ch_type_idx[adc][c]]] / 2. for c in current_type]
-                current_data['digital'] += sum(tmp_vals)
+                tmp_dig_vals += [data[self.channels[adc][self.ch_type_idx[adc][c]]] for c in current_type]
 
+        current_data['digital'] += sum([val / float(len(tmp_dig_vals)) for val in tmp_dig_vals])
+
+        # From the analog sum signal of all SEM foils
         if 'sem_sum' in self.ch_type_idx[adc]:
             current_data['analog'] = data[self.channels[adc][self.ch_type_idx[adc]['sem_sum']]]
 
