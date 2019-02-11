@@ -520,15 +520,20 @@ class BeamPositionPlot(pg.PlotWidget):
         self.legend = pg.LegendItem(offset=(80, -50))
         self.legend.setParentItem(self.plt)
 
-        self.curves = OrderedDict([('digital', None), ('analog', None)])
+        self.curves = OrderedDict()
 
-    def _init_pos_items(self, data):
+        if any(x in self.ro_types for x in ('sem_h_shift', 'sem_v_shift')):
+            sig = 'analog'
+            self.curves[sig] = BeamPositionItem(color=MPL_COLORS[0], name=sig,
+                                                horizontal='sem_h_shift' in self.ro_types,
+                                                vertical='sem_v_shift' in self.ro_types)
 
-        meta, pos_data = data['meta'], data['data']['position']
+        if any(all(x in self.ro_types for x in y) for y in [('sem_left', 'sem_right'), ('sem_up', 'sem_down')]):
+            sig = 'digital'
+            self.curves[sig] = BeamPositionItem(color=MPL_COLORS[1], name=sig,
+                                                horizontal='sem_left' in self.ro_types and 'sem_right' in self.ro_types,
+                                                vertical='sem_up' in self.ro_types and 'sem_down' in self.ro_types)
 
-        for i, sig in enumerate(pos_data):
-            self.curves[sig] = BeamPositionItem(color=MPL_COLORS[i], name=sig.capitalize() + ' position',
-                                                horizontal='h' in pos_data[sig], vertical='v' in pos_data[sig])
         # Show data and legend
         if self.curves:
             for curve in self.curves:
@@ -538,14 +543,12 @@ class BeamPositionPlot(pg.PlotWidget):
 
     def set_data(self, data):
 
-        # Initialize BeamPositionItems
-        if None in self.curves.values():
-            self._init_pos_items(data)
-
         # Meta data and data
         meta, pos_data = data['meta'], data['data']['position']
 
         for sig in pos_data:
+            if sig not in self.curves:
+                continue
             h_shift = None if 'h' not in pos_data[sig] else pos_data[sig]['h']
             v_shift = None if 'v' not in pos_data[sig] else pos_data[sig]['v']
             self.curves[sig].set_position(h_shift, v_shift)
