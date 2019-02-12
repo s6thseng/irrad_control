@@ -5,7 +5,14 @@
 lambda_1:
   nominal: 770.97e-3
   sigma: 4.93e-3
+  hv_sem: 70 V
   unit: 1/V
   device: SEM_C
   ascitime: Thu Jan 23 00:00:00 2019 
-  
+lambda_2:
+  nominal: 837.70e-3
+  sigma: 2.267e-4
+  hv_sem: 100 V
+  unit: 1/V
+  device: SEM_C
+  ascitime: Tue Feb 5 14:50:03 2019
