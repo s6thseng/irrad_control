@@ -77,11 +77,21 @@ class IrradServer(multiprocessing.Process):
         self.adc.cal_self()
     
         # Declare all available channels of the ADS1256
-        self._all_channels = [ch_i | NEG_AINCOM for ch_i in (POS_AIN0, POS_AIN1, POS_AIN2, POS_AIN3,
-                                                             POS_AIN4, POS_AIN5, POS_AIN6, POS_AIN7)]
+        self._pos_channels = (POS_AIN0, POS_AIN1, POS_AIN2, POS_AIN3, POS_AIN4, POS_AIN5, POS_AIN6, POS_AIN7)
+        self._gnd = NEG_AINCOM
+        self.adc_channels = []
 
         # Assign the physical channel numbers e.g. multiplexer address
-        self.adc_channels = [self._all_channels[i] for i in self.daq_setup['ch_numbers']]
+        for ch in self.daq_setup['ch_numbers']:
+            # Single-ended versus common ground self._gnd
+            if isinstance(ch, int):
+                tmp_ch = self._pos_channels[ch] | self._gnd
+            # Differential measurement
+            else:
+                a, b = ch
+                tmp_ch = self._pos_channels[a] | self._pos_channels[b]
+            # Add to channels
+            self.adc_channels.append(tmp_ch)
 
     def _start_server(self, irrad_setup):
         """Sets up the server process"""

@@ -25,7 +25,7 @@ class IrradSetup(QtWidgets.QWidget):
 
         # Make defaults
         self.default_channels = ('Left', 'Right', 'Up', 'Down', 'Sum', 'H_shift', 'V_shift')
-        self.default_types = roe_output + ['None']
+        self.default_types = roe_output
 
         # Store widgets for daq and session input
         self.daq_widgets = {}
@@ -200,7 +200,8 @@ class IrradSetup(QtWidgets.QWidget):
 
         # Input widgets lists
         edits = []
-        comboboxes = []
+        combos_types = []
+        combos_refs = []
 
         # Label for DAQ device
         label_daq = QtWidgets.QLabel('DAQ')
@@ -216,7 +217,7 @@ class IrradSetup(QtWidgets.QWidget):
                            lambda text: self.daq_widgets['srate_combo'].setEnabled(True if text else False),
                            lambda text: self.daq_widgets['prop_combo'].setEnabled(True if text else False),
                            lambda text: self.daq_widgets['kappa_combo'].setEnabled(True if text else False),
-                           lambda text: [w.setEnabled(True if text else False) for k in ('channel_edits', 'type_combos') for w in self.daq_widgets[k]],
+                           lambda text: [w.setEnabled(True if text else False) for k in ('channel_edits', 'type_combos', 'ref_combos') for w in self.daq_widgets[k]],
                            lambda _: [w.textChanged.emit(w.text()) for w in self.daq_widgets['channel_edits']]]:
 
             edit_name.textChanged.connect(connection)
@@ -273,36 +274,54 @@ class IrradSetup(QtWidgets.QWidget):
         label_channel_name.setToolTip('Name of respective channel')
         label_type = QtWidgets.QLabel('Type')
         label_type.setToolTip('Type of channel according to the custom readout electronics')
+        label_ref = QtWidgets.QLabel('Reference')
+        label_ref.setToolTip('Reference channel for voltage measurement. Can be ground (GND) or any of the other channels')
 
         # Add to layout
         layout_daq.addWidget(label_channel, 6, 1, 1, 1)
         layout_daq.addWidget(label_channel_number, 6, 2, 1, 1)
         layout_daq.addWidget(label_channel_name, 6, 3, 1, 1)
         layout_daq.addWidget(label_type, 6, 4, 1, 1)
+        layout_daq.addWidget(label_ref, 6, 5, 1, 1)
 
         # Loop over number of available ADC channels which is 8.
         # Make combobox for channel type, edit for name and label for physical channel number
         for i in range(self.n_channels_per_adc):
             # Channel type combobox
-            _cbx = QtWidgets.QComboBox()
-            _cbx.addItems(self.default_types)
-            _cbx.setToolTip('Select type of readout channel. If not None, this info is used for data analysis and visualization.')
-            _cbx.setCurrentIndex(i if i < len(self.default_channels) else self.default_types.index('None'))
+            _cbx_type = QtWidgets.QComboBox()
+            _cbx_type.addItems(self.default_types)
+            _cbx_type.setToolTip('Select type of readout channel. If not None, this info is used for data analysis and visualization.')
+            _cbx_type.setCurrentIndex(i if i < len(self.default_channels) else self.default_types.index('none'))
+
+            # Reference channel to measure voltage; can be GND or any of the other channels
+            _cbx_ref = QtWidgets.QComboBox()
+            _cbx_ref.addItems(['GND'] + [str(k) for k in range(1, self.n_channels_per_adc + 1) if k != i + 1])
+            _cbx_ref.setCurrentIndex(0)
+            _cbx_ref.setProperty('lastitem', 'GND')
+            _cbx_ref.currentTextChanged.connect(lambda item, c=_cbx_ref: self._handle_ref_channels(item, c))
 
             # Channel name edit
             _edit = QtWidgets.QLineEdit()
             _edit.setPlaceholderText('None')
-            _edit.textChanged.connect(lambda text, cbx=_cbx: cbx.setEnabled(True if text else False))
+            _edit.textChanged.connect(lambda text, cbx=_cbx_type: cbx.setEnabled(True if text else False))
+            _edit.textChanged.connect(lambda text, cbx=_cbx_ref: cbx.setEnabled(True if text else False))
             _edit.setText('' if i > len(self.default_channels) - 1 else self.default_channels[i])
+
+            # Disable widgets at first
             _edit.setEnabled(False)
-            _cbx.setEnabled(False)
+            _cbx_type.setEnabled(False)
+            _cbx_ref.setEnabled(False)
+
+            # Append to list
             edits.append(_edit)
-            comboboxes.append(_cbx)
+            combos_types.append(_cbx_type)
+            combos_refs.append(_cbx_ref)
 
             # Add to layout
             layout_daq.addWidget(QtWidgets.QLabel('{}.'.format(i+1)), i + 7, 2, 1, 1)
             layout_daq.addWidget(_edit, i + 7, 3, 1, 1)
-            layout_daq.addWidget(_cbx, i + 7, 4, 1, 1)
+            layout_daq.addWidget(_cbx_type, i + 7, 4, 1, 1)
+            layout_daq.addWidget(_cbx_ref, i + 7, 5, 1, 1)
 
         # Store all input related widgets in dict
         self.daq_widgets['name_edit'] = edit_name
@@ -311,10 +330,43 @@ class IrradSetup(QtWidgets.QWidget):
         self.daq_widgets['scale_combo'] = combo_scale
         self.daq_widgets['srate_combo'] = combo_srate
         self.daq_widgets['channel_edits'] = edits
-        self.daq_widgets['type_combos'] = comboboxes
+        self.daq_widgets['type_combos'] = combos_types
+        self.daq_widgets['ref_combos'] = combos_refs
 
         # Add this widget to right widget
         self.right_layout.addWidget(self.right_widget)
+
+    def _handle_ref_channels(self, item, cbx):
+
+        sender_idx = self.daq_widgets['ref_combos'].index(cbx) + 1
+
+        idx = None if item == 'GND' else int(item) - 1
+        lastitem = cbx.property('lastitem')
+        last_idx = None if lastitem == 'GND' else int(lastitem)
+        cbx.setProperty('lastitem', 'GND' if idx is None else str(idx))
+
+        if idx:
+
+            self.daq_widgets['channel_edits'][idx].setText('')
+            self.daq_widgets['channel_edits'][idx].setPlaceholderText('Ref. to ch. {}'.format(sender_idx))
+            self.daq_widgets['channel_edits'][idx].setEnabled(False)
+
+            for rcbx in self.daq_widgets['ref_combos']:
+                if cbx != rcbx:
+                    for i in range(rcbx.count()):
+                        if rcbx.itemText(i) == item or rcbx.itemText(i) == str(sender_idx):
+                            rcbx.model().item(i).setEnabled(False)
+
+        if last_idx:
+
+            self.daq_widgets['channel_edits'][last_idx].setEnabled(True)
+            self.daq_widgets['channel_edits'][last_idx].setPlaceholderText('None')
+
+            for rcbx in self.daq_widgets['ref_combos']:
+                if cbx != rcbx:
+                    for i in range(rcbx.count()):
+                        if rcbx.itemText(i) == str(last_idx + 1) or (idx is None and rcbx.itemText(i) == str(sender_idx)):
+                            rcbx.model().item(i).setEnabled(True)
 
     def _fill_checkbox_items(self, chbx, fill_dict):
 
@@ -442,7 +494,7 @@ class IrradSetup(QtWidgets.QWidget):
         tmp_daq['types'] = [tc.currentText() for i, tc in enumerate(self.daq_widgets['type_combos'])
                             if self.daq_widgets['channel_edits'][i].text()]
 
-        tmp_daq['ch_numbers'] = [i for i, w in enumerate(self.daq_widgets['channel_edits']) if w.text()]
+        tmp_daq['ch_numbers'] = [i if self.daq_widgets['ref_combos'][i].currentText() == 'GND' else (i, -1 + int(self.daq_widgets['ref_combos'][i].currentText())) for i, w in enumerate(self.daq_widgets['channel_edits']) if w.text()]
 
         tmp_daq['sampling_rate'] = int(self.daq_widgets['srate_combo'].currentText())
 
