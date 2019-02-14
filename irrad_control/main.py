@@ -178,9 +178,6 @@ class IrradControlWin(QtWidgets.QMainWindow):
         # Init daq info widget
         self._init_daq_dock()
 
-        # Start logging data
-        self._init_data_log()
-
         # Start receiving data and log
         self._init_threads()
 
@@ -266,21 +263,6 @@ class IrradControlWin(QtWidgets.QMainWindow):
         
         for worker in self.workers:
             self.threadpool.start(self.workers[worker])
-            
-    def _init_data_log(self):
-        # Open log files for all adcs
-        self.log_files = dict([(adc, open(self.setup['log']['file'].split('.')[0] + '_{}.txt'.format(adc), 'a'))
-                               for adc in self.setup['daq']])
-
-        for adc in self.log_files:    
-            # write info header
-            self.log_files[adc].write('# Date: %s \n' % time.asctime())
-    
-            # write data header
-            d_header = '# Timestamp / s\t' + ' \t'.join('%s / V' % c for c in self.setup['daq'][adc]['channels']) + '\n'
-            d_header += '# ch_types / s\t' + ' \t'.join('%s / V' % c for c in self.setup['daq'][adc]['types']) + '\n'
-            
-            self.log_files[adc].write(d_header)
         
     def _tcp_addr(self, port, ip='*'):
         """Creates string of complete tcp address which sockets can bind to"""
@@ -319,10 +301,6 @@ class IrradControlWin(QtWidgets.QMainWindow):
             self.daq_info_widget.update_raw_data(data)
 
             self.monitor_tab.plots[adc]['raw_plot'].set_data(data)
-
-            # TODO: Only log data when specified in control tab
-            # if self.control_tab.log_data:
-            self._log_data(data)
 
         # Check whether data is interpreted
         elif data['meta']['type'] == 'beam':
@@ -436,20 +414,6 @@ class IrradControlWin(QtWidgets.QMainWindow):
             if log:
                 self.log_received.emit(log.strip())
 
-    def _log_data(self, data):
-            
-        timestamp = data['meta']['timestamp']
-        _data = data['data']
-        adc = data['meta']['name']
-        
-        if self.receive_data:
-        
-            # write timestamp to file
-            self.log_files[adc].write('%f\t' % timestamp)
-    
-            # write voltages to file
-            self.log_files[adc].write('\t'.join('%.{}f'.format(3) % _data[v] for v in self.setup['daq'][adc]['channels']) + '\n')
-
     def handle_messages(self, message, ms=4000):
         """Handles messages from the tabs shown in QMainWindows statusBar"""
 
@@ -479,16 +443,12 @@ class IrradControlWin(QtWidgets.QMainWindow):
         self.receive_data = False
         self.receive_log = False
         self.threadpool.clear()
-        
-        # Close open log files
-        for log_file in self.log_files:
-            self.log_files[log_file].close()
             
         # Kill server process on host
         self.server.shutdown_server()
 
         if self.interpreter.is_alive():
-            self.interpreter.terminate()
+            self.interpreter.shutdown()
         
         # Give 1 second to shut everything down
         start = time.time()

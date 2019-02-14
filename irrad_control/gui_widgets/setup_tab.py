@@ -99,23 +99,22 @@ class IrradSetup(QtWidgets.QWidget):
         label_id.setToolTip('Identifier appended to all files created within this session if no name specified.')
         edit_id = QtWidgets.QLineEdit()
         edit_id.textEdited.connect(
-            lambda text: edit_log_file.setPlaceholderText(self.log_file + '_' + (text if text else self.session_id)))
+            lambda text: edit_out_file.setPlaceholderText(self.log_file + '_' + (text if text else self.session_id)))
         edit_id.setPlaceholderText(self.session_id)
 
         # Add to layout
         layout_session.addWidget(label_id, 2, 1, 1, 1)
         layout_session.addWidget(edit_id, 2, 2, 1, 1)
 
-        # Label and widgets for log file input
-        label_log_file = QtWidgets.QLabel('Raw data file:')
-        edit_log_file = QtWidgets.QLineEdit()
-        edit_log_file.setPlaceholderText(self.log_file + '_' + self.session_id)
-        label_log_suffix = QtWidgets.QLabel('.txt')
+        # Label and widgets for output file
+        label_out_file = QtWidgets.QLabel('Output file:')
+        label_out_file.setToolTip('Base name of output file containing raw and interpreted data')
+        edit_out_file = QtWidgets.QLineEdit()
+        edit_out_file.setPlaceholderText(self.log_file + '_' + self.session_id)
 
         # Add to layout
-        layout_session.addWidget(label_log_file, 3, 1, 1, 1)
-        layout_session.addWidget(edit_log_file, 3, 2, 1, 1)
-        layout_session.addWidget(label_log_suffix, 3, 3, 1, 1)
+        layout_session.addWidget(label_out_file, 3, 1, 1, 1)
+        layout_session.addWidget(edit_out_file, 3, 2, 1, 1)
 
         # Label and combobox to set logging level
         label_logging = QtWidgets.QLabel('Logging level:')
@@ -179,7 +178,7 @@ class IrradSetup(QtWidgets.QWidget):
         # Store all relevant input widgets
         self.session_widgets['folder_edit'] = edit_folder
         self.session_widgets['id_edit'] = edit_id
-        self.session_widgets['logfile_edit'] = edit_log_file
+        self.session_widgets['outfile_edit'] = edit_out_file
         self.session_widgets['logging_combo'] = combo_logging
         self.session_widgets['server_edit'] = edit_server
         self.session_widgets['host_edit'] = edit_host
@@ -468,14 +467,14 @@ class IrradSetup(QtWidgets.QWidget):
         # Update
         self.session_id = self.session_widgets['id_edit'].text() or self.session_widgets['id_edit'].placeholderText()
         self.output_path = self.session_widgets['folder_edit'].text()
-        self.log_file = self.session_widgets['logfile_edit'].text() or self.session_widgets['logfile_edit'].placeholderText()
+        self.log_file = self.session_widgets['outfile_edit'].text() or self.session_widgets['outfile_edit'].placeholderText()
 
         # Session setup
-        self.setup['log'] = {}
+        self.setup['session'] = {}
 
-        self.setup['log']['level'] = self.session_widgets['logging_combo'].currentText()
-
-        self.setup['log']['file'] = os.path.join(self.output_path, self.log_file + '.txt')
+        self.setup['session']['loglevel'] = self.session_widgets['logging_combo'].currentText()
+        self.setup['session']['outfile'] = os.path.join(self.output_path, self.log_file)
+        self.setup['session']['outfolder'] = self.output_path
 
         # DAQ setup
         self.setup['tcp'] = dict([('ip', {}), ('port', dict(self.zmq_setup.ports))])

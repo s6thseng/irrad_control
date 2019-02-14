@@ -49,9 +49,9 @@ class IrradServer(multiprocessing.Process):
         """Setup logging"""
 
         # Numeric logging level
-        numeric_level = getattr(logging, self.irrad_setup['log']['level'].upper(), None)
+        numeric_level = getattr(logging, self.irrad_setup['session']['loglevel'].upper(), None)
         if not isinstance(numeric_level, int):
-            raise ValueError('Invalid log level: {}'.format(self.irrad_setup['log']['level']))
+            raise ValueError('Invalid log level: {}'.format(self.irrad_setup['session']['loglevel']))
 
         # Set level
         logging.basicConfig(level=numeric_level)

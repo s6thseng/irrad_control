@@ -3,6 +3,8 @@ import time
 import multiprocessing
 import logging
 import psutil
+import numpy as np
+import tables as tb
 from zmq.log import handlers
 from irrad_control import roe_output
 
@@ -26,6 +28,16 @@ class IrradInterpreter(multiprocessing.Process):
         self._recv_data = True
         self._recv_cmds = True
         self._busy_cmd = False
+        self.write_data = True
+
+        # Data writing
+        #self.tables = None
+        #self.raw_table = None
+        #self.beam_table = None
+        #self.fluence_table = None
+        #self.raw_data = None
+        #self.beam_data = None
+        #self.fluence_data = None
 
         # Attributes for zmq
         self.context = None
@@ -53,13 +65,16 @@ class IrradInterpreter(multiprocessing.Process):
         # Start logging
         self._setup_logging()
 
+        # Start daq
+        self._setup_daq()
+
     def _setup_logging(self):
         """Setup logging"""
 
         # Numeric logging level
-        numeric_level = getattr(logging, self.irrad_setup['log']['level'].upper(), None)
+        numeric_level = getattr(logging, self.session_setup['loglevel'].upper(), None)
         if not isinstance(numeric_level, int):
-            raise ValueError('Invalid log level: {}'.format(self.irrad_setup['log']['level']))
+            raise ValueError('Invalid log level: {}'.format(self.session_setup['loglevel']))
 
         # Set level
         logging.basicConfig(level=numeric_level)
@@ -72,12 +87,76 @@ class IrradInterpreter(multiprocessing.Process):
         handler = handlers.PUBHandler(log_pub)
         logging.getLogger().addHandler(handler)
 
+    def _setup_daq(self):
+
+        self.tables = {}
+        self.raw_table = {}
+        self.beam_table = {}
+        self.fluence_table = {}
+        self.raw_data = {}
+        self.beam_data = {}
+        self.fluence_data = {}
+
+        # Possible channels from which to get the beam positions
+        self.pos_types = {'h': {'digital': ['sem_left', 'sem_right'], 'analog': ['sem_h_shift']},
+                          'v': {'digital': ['sem_up', 'sem_down'], 'analog': ['sem_v_shift']}}
+
+        # Possible channels from which to get the beam current
+        self.current_types = {'digital': [('sem_left', 'sem_right'), ('sem_up', 'sem_down')], 'analog': ['sem_sum']}
+
+        # Dtype for fluence data
+        fluence_dtype = [('scan', '<i4'), ('row', '<i4'), ('current', '<f4'), ('pfluence', '<f8'), ('nfluence', '<f8'),
+                         ('timestamp_start', '<f4'), ('x_start', '<f4'), ('y_start', '<f4'),
+                         ('timestamp_stop', '<f4'), ('x_stop', '<f4'), ('y_stop', '<f4')]
+
+        for adc in self.channels:
+
+            # Make structured arrays for data organization when dropping to table
+            raw_dtype = [('timestamp', '<f8')] + [(ch, '<f4') for ch in self.channels[adc]]
+            beam_dtype = [('timestamp', '<f8')]
+
+            # Check which data will be interpreted
+            # Beam position
+            for pos_type in self.pos_types:
+                for sig in self.pos_types[pos_type]:
+                    if all(t in self.ch_type_idx[adc] for t in self.pos_types[pos_type][sig]):
+                        beam_dtype.append(('position_{}_{}'.format(pos_type, sig), '<f4'))
+
+            # Beam current
+            for curr_type in self.current_types:
+                if any(all(s in self.ch_type_idx[adc] for s in t) for t in self.current_types[curr_type]):
+                    beam_dtype.append(('current_{}'.format(curr_type), '<f4'))
+
+            # Make arrays with given dtypes
+            self.raw_data[adc] = np.zeros(shape=1, dtype=raw_dtype)
+            self.beam_data[adc] = np.zeros(shape=1, dtype=beam_dtype)
+            self.fluence_data[adc] = np.zeros(shape=1, dtype=fluence_dtype)
+
+            print self.raw_data[adc]
+            print self.beam_data[adc]
+            print self.fluence_data[adc]
+
+            # Open adc table
+            self.tables[adc] = tb.open_file(self.session_setup['outfile'] + '_{}.h5'.format(adc), 'w')
+
+            # Create data tables
+            self.raw_table[adc] = self.tables[adc].create_table(self.tables[adc].root,
+                                                                description=self.raw_data[adc].dtype,
+                                                                name='Raw')
+            self.beam_table[adc] = self.tables[adc].create_table(self.tables[adc].root,
+                                                                 description=self.beam_data[adc].dtype,
+                                                                 name='Beam')
+            self.fluence_table[adc] = self.tables[adc].create_table(self.tables[adc].root,
+                                                                    description=self.fluence_data[adc].dtype,
+                                                                    name='Fluence')
+
     def update_setup(self, setup):
 
         # General setup
         self.irrad_setup = setup
         self.tcp_setup = setup['tcp']
         self.adc_names = setup['daq'].keys()
+        self.session_setup = setup['session']
 
         # Per ADC
         self.daq_setup = dict([(adc, self.irrad_setup['daq'][adc]) for adc in self.adc_names])
@@ -140,6 +219,13 @@ class IrradInterpreter(multiprocessing.Process):
         for v in current_data:
             current_data[v] *= self.daq_setup[adc]['ro_scale'] * self.daq_setup[adc]['prop_constant'] * 1e-9
 
+        if self.write_data:
+            self.raw_data[adc]['timestamp'] = meta_data['timestamp']
+            for ch in data:
+                self.raw_data[adc][ch] = data['ch']
+            self.raw_table[adc].append(self.raw_data)
+            self.raw_table[adc].flush()
+
         # Publish data
         beam_data = {'meta': {'timestamp': time.time(), 'name': adc, 'type': 'beam'},
                      'data': {'position': pos_data, 'current': current_data}}
@@ -158,6 +244,13 @@ class IrradInterpreter(multiprocessing.Process):
 
         # Horizontally, if we are shifted to the left the graph should move to the left, therefore * -1
         return res if res is None else -1 * res if m == 'h' else res
+
+    def shutdown(self):
+        self.write_data = False
+        # Close files
+        for adc in self.tables:
+            self.tables[adc].close()
+        self.terminate()
 
     def run(self):
 
