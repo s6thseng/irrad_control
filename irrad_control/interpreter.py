@@ -99,11 +99,11 @@ class IrradInterpreter(multiprocessing.Process):
         self.fluence_data = {}
 
         # Possible channels from which to get the beam positions
-        self.pos_types = {'h': {'digital': ['sem_left', 'sem_right'], 'analog': ['sem_h_shift']},
-                          'v': {'digital': ['sem_up', 'sem_down'], 'analog': ['sem_v_shift']}}
+        pos_types = {'h': {'digital': ['sem_left', 'sem_right'], 'analog': ['sem_h_shift']},
+                     'v': {'digital': ['sem_up', 'sem_down'], 'analog': ['sem_v_shift']}}
 
         # Possible channels from which to get the beam current
-        self.current_types = {'digital': [('sem_left', 'sem_right'), ('sem_up', 'sem_down')], 'analog': ['sem_sum']}
+        current_types = {'digital': [('sem_left', 'sem_right'), ('sem_up', 'sem_down')], 'analog': 'sem_sum'}
 
         # Dtype for fluence data
         fluence_dtype = [('scan', '<i4'), ('row', '<i4'), ('current', '<f4'), ('pfluence', '<f8'), ('nfluence', '<f8'),
@@ -119,15 +119,19 @@ class IrradInterpreter(multiprocessing.Process):
 
             # Check which data will be interpreted
             # Beam position
-            for pos_type in self.pos_types:
-                for sig in self.pos_types[pos_type]:
-                    if all(t in self.ch_type_idx[adc] for t in self.pos_types[pos_type][sig]):
+            for pos_type in pos_types:
+                for sig in pos_types[pos_type]:
+                    if all(t in self.ch_type_idx[adc] for t in pos_types[pos_type][sig]):
                         beam_dtype.append(('position_{}_{}'.format(pos_type, sig), '<f4'))
 
             # Beam current
-            for curr_type in self.current_types:
-                if any(all(s in self.ch_type_idx[adc] for s in t) for t in self.current_types[curr_type]):
-                    beam_dtype.append(('current_{}'.format(curr_type), '<f4'))
+            for curr_type in current_types:
+                if curr_type == 'digital':
+                    if any(all(s in self.ch_type_idx[adc] for s in t) for t in current_types[curr_type]):
+                        beam_dtype.append(('current_{}'.format(curr_type), '<f4'))
+                else:
+                    if current_types[curr_type] in self.ch_type_idx[adc]:
+                        beam_dtype.append(('current_{}'.format(curr_type), '<f4'))
 
             # Make arrays with given dtypes
             self.raw_data[adc] = np.zeros(shape=1, dtype=raw_dtype)
