@@ -185,7 +185,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         self._init_server()
 
         # Init interpreter
-        self.interpreter.update_setup(setup)
+        self.interpreter._init_setup(setup)
         self.interpreter.start()
 
     def _init_log_dock(self):
@@ -439,21 +439,23 @@ class IrradControlWin(QtWidgets.QMainWindow):
             msg_box = QtWidgets.QMessageBox.information(self, title, msg, QtWidgets.QMessageBox.Ok)
             
     def _clean_up(self):
-        # Stop receiver threads and delete
-        self.receive_data = False
-        self.receive_log = False
-        self.threadpool.clear()
-            
+
+        # Stop interpreter and terminate
+        self.interpreter.shutdown()
+        self.interpreter.join()
+
         # Kill server process on host
         self.server.shutdown_server()
 
-        if self.interpreter.is_alive():
-            self.interpreter.shutdown()
-        
         # Give 1 second to shut everything down
         start = time.time()
         while time.time() - start < 1:
             QtWidgets.QApplication.processEvents()
+
+        # Stop receiver threads and delete
+        self.receive_data = False
+        self.receive_log = False
+        self.threadpool.clear()
         
     def file_quit(self):
 

@@ -4,7 +4,6 @@ import time
 import multiprocessing
 import threading
 import logging
-import psutil
 from zmq.log import handlers
 from adc.ADS1256_definitions import *
 from adc.ADS1256_drates import ads1256_drates
@@ -28,9 +27,6 @@ class IrradServer(multiprocessing.Process):
         # Init zmq related attributes
         self.server_rep = None
         self.context = None
-
-        # Process interface
-        self.process = psutil.Process(self.ident)
 
         # Attribute to hold beam current; needed for XY-Stage as scan criteria
         self.beam_current = None
@@ -63,6 +59,9 @@ class IrradServer(multiprocessing.Process):
         # Create logging publisher first
         handler = handlers.PUBHandler(log_pub)
         logging.getLogger().addHandler(handler)
+
+        # Allow connections to be made
+        time.sleep(1)
         
     def _setup_adc(self):
         """Setup the ADS1256 instance and channels"""

@@ -2,7 +2,6 @@ import zmq
 import time
 import multiprocessing
 import logging
-import psutil
 import numpy as np
 import tables as tb
 from zmq.log import handlers
@@ -15,36 +14,34 @@ class IrradInterpreter(multiprocessing.Process):
     def __init__(self, name=None):
         super(IrradInterpreter, self).__init__()
 
+        """
+        IMPORTANT:
+        The attributes initialized in here are only available as COPIES in the run()-method.
+        In order to change attributes during runtime use multiprocessing.Event objects or queues. 
+        """
+
         self.name = 'interpreter' if name is None else name
 
-        # Attribute to store setup in
-        self.irrad_setup = None
-        self.tcp_setup = None
-        self.adc_names = None
-        self.daq_setup = None
+        # Attributes to interact with the actual process stuff running within run()
+        self.stop_recv_data = multiprocessing.Event()
+        self.stop_write_data = multiprocessing.Event()
 
-        # Attributes to handle sending / receiving and handling commands
-        self._send_data = True
-        self._recv_data = True
-        self._recv_cmds = True
-        self._busy_cmd = False
-        self.write_data = True
+    def _init_setup(self, setup):
 
-        # Data writing
-        #self.tables = None
-        #self.raw_table = None
-        #self.beam_table = None
-        #self.fluence_table = None
-        #self.raw_data = None
-        #self.beam_data = None
-        #self.fluence_data = None
+        # General setup
+        self.irrad_setup = setup
+        self.tcp_setup = setup['tcp']
+        self.adc_names = setup['daq'].keys()
+        self.session_setup = setup['session']
 
-        # Attributes for zmq
-        self.context = None
-        self.data_pub = None
+        # Per ADC
+        self.daq_setup = dict([(adc, self.irrad_setup['daq'][adc]) for adc in self.adc_names])
+        self.channels = dict([(adc, self.daq_setup[adc]['channels']) for adc in self.adc_names])
+        self.ch_type_idx = {}
 
-        # Process info
-        self.process = psutil.Process(self.ident)
+        for adc in self.adc_names:
+            self.ch_type_idx[adc] = dict([(x, self.daq_setup[adc]['types'].index(x))
+                                          for x in roe_output if x in self.daq_setup[adc]['types']])
 
     def _tcp_addr(self, port, ip='*'):
         """Creates string of complete tcp address which sockets can bind to"""
@@ -87,8 +84,12 @@ class IrradInterpreter(multiprocessing.Process):
         handler = handlers.PUBHandler(log_pub)
         logging.getLogger().addHandler(handler)
 
+        # Allow connections to be made
+        time.sleep(1)
+
     def _setup_daq(self):
 
+        # Data writing
         self.tables = {}
         self.raw_table = {}
         self.beam_table = {}
@@ -109,6 +110,7 @@ class IrradInterpreter(multiprocessing.Process):
                          ('timestamp_start', '<f4'), ('x_start', '<f4'), ('y_start', '<f4'),
                          ('timestamp_stop', '<f4'), ('x_stop', '<f4'), ('y_stop', '<f4')]
 
+        # Open respective table files per ADC and check which data will be interpreted
         for adc in self.channels:
 
             # Make structured arrays for data organization when dropping to table
@@ -132,10 +134,6 @@ class IrradInterpreter(multiprocessing.Process):
             self.beam_data[adc] = np.zeros(shape=1, dtype=beam_dtype)
             self.fluence_data[adc] = np.zeros(shape=1, dtype=fluence_dtype)
 
-            print self.raw_data[adc]
-            print self.beam_data[adc]
-            print self.fluence_data[adc]
-
             # Open adc table
             self.tables[adc] = tb.open_file(self.session_setup['outfile'] + '_{}.h5'.format(adc), 'w')
 
@@ -150,39 +148,16 @@ class IrradInterpreter(multiprocessing.Process):
                                                                     description=self.fluence_data[adc].dtype,
                                                                     name='Fluence')
 
-    def update_setup(self, setup):
-
-        # General setup
-        self.irrad_setup = setup
-        self.tcp_setup = setup['tcp']
-        self.adc_names = setup['daq'].keys()
-        self.session_setup = setup['session']
-
-        # Per ADC
-        self.daq_setup = dict([(adc, self.irrad_setup['daq'][adc]) for adc in self.adc_names])
-        self.channels = dict([(adc, self.daq_setup[adc]['channels']) for adc in self.adc_names])
-        self.ch_type_idx = {}
-
-        for adc in self.adc_names:
-            self.ch_type_idx[adc] = dict([(x, self.daq_setup[adc]['types'].index(x))
-                                          for x in roe_output if x in self.daq_setup[adc]['types']])
-
-    def recv_data(self):
-        """Method that is run on different thread which receives raw data and calls interpretation method"""
-
-        # Create subscriber for raw and XY-Stage data
-        data_sub = self.context.socket(zmq.SUB)
-        data_sub.connect(self._tcp_addr(self.tcp_setup['port']['data'], ip=self.tcp_setup['ip']['server']))
-        data_sub.setsockopt(zmq.SUBSCRIBE, '')
-
-        while self._recv_data:
-            data = data_sub.recv_json()
-            self.interpret_data(data)
-
     def interpret_data(self, raw_data):
         """Interpretation of the data"""
 
         adc, meta_data, data = raw_data['meta']['name'], raw_data['meta'], raw_data['data']
+
+        if not self.stop_write_data.is_set():
+            self.raw_data[adc]['timestamp'] = meta_data['timestamp']
+            for ch in data:
+                self.raw_data[adc][ch] = data[ch]
+            self.raw_table[adc].append(self.raw_data[adc])
 
         # Beam position
         pos_data = {'digital': {}, 'analog': {}}
@@ -219,13 +194,6 @@ class IrradInterpreter(multiprocessing.Process):
         for v in current_data:
             current_data[v] *= self.daq_setup[adc]['ro_scale'] * self.daq_setup[adc]['prop_constant'] * 1e-9
 
-        if self.write_data:
-            self.raw_data[adc]['timestamp'] = meta_data['timestamp']
-            for ch in data:
-                self.raw_data[adc][ch] = data['ch']
-            self.raw_table[adc].append(self.raw_data)
-            self.raw_table[adc].flush()
-
         # Publish data
         beam_data = {'meta': {'timestamp': time.time(), 'name': adc, 'type': 'beam'},
                      'data': {'position': pos_data, 'current': current_data}}
@@ -245,17 +213,39 @@ class IrradInterpreter(multiprocessing.Process):
         # Horizontally, if we are shifted to the left the graph should move to the left, therefore * -1
         return res if res is None else -1 * res if m == 'h' else res
 
+    def recv_data(self):
+        """Method that is run on different thread which receives raw data and calls interpretation method"""
+
+        # Create subscriber for raw and XY-Stage data
+        data_sub = self.context.socket(zmq.SUB)
+        data_sub.connect(self._tcp_addr(self.tcp_setup['port']['data'], ip=self.tcp_setup['ip']['server']))
+        data_sub.setsockopt(zmq.SUBSCRIBE, '')
+
+        while not self.stop_recv_data.wait(0.001):
+            try:
+                data = data_sub.recv_json(flags=zmq.NOBLOCK)
+                self.interpret_data(data)
+            except zmq.Again:  # no data
+                pass
+
     def shutdown(self):
-        self.write_data = False
-        # Close files
+        self.stop_recv_data.set()
+
+    def _close_tables(self):
         for adc in self.tables:
             self.tables[adc].close()
-        self.terminate()
 
     def run(self):
 
-        # Setup interpreters zmq connections and logging
+        # Setup interpreters zmq connections and logging and daq
         self._setup_interpreter()
+
+        logging.info('Starting {}'.format(self.name))
 
         # Main process runs command receive loop
         self.recv_data()
+
+        # Close opened data tables
+        self._close_tables()
+
+        logging.info('{} finished'.format(self.name))
