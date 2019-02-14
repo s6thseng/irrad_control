@@ -157,7 +157,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
             if name == 'Setup':
                 self.setup_tab = IrradSetup(parent=self)
                 self.setup_tab.setupCompleted.connect(lambda setup: self._init_setup(setup))
-                self.setup_tab.setupCompleted.connect(self.setup_tab.set_read_only)
+                self.threadpool.start(Worker(func=self.setup_tab._find_available_servers))
 
                 tw[name] = self.setup_tab
             else:

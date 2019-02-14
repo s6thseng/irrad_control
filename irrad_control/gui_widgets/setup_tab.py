@@ -1,7 +1,7 @@
 import yaml
 import os
 import time
-from subprocess import check_output, CalledProcessError
+import subprocess
 from PyQt5 import QtWidgets, QtCore
 from irrad_control import roe_output, ro_scales, ads1256
 from irrad_control import proportionality_constants, server_ips, hardness_factors, config_path
@@ -13,6 +13,7 @@ class IrradSetup(QtWidgets.QWidget):
 
     # Signal emitted when setup is completed
     setupCompleted = QtCore.pyqtSignal(dict)
+    serverIPsFound = QtCore.pyqtSignal(list)
 
     def __init__(self, parent=None):
         super(IrradSetup, self).__init__(parent)
@@ -44,16 +45,19 @@ class IrradSetup(QtWidgets.QWidget):
         self.main_layout = QtWidgets.QHBoxLayout()
         self.left_layout = QtWidgets.QVBoxLayout()
         self.right_layout = QtWidgets.QVBoxLayout()
-        
+
         # Add left and right to main
         self.main_layout.addLayout(self.left_layout)
         self.main_layout.addLayout(self.right_layout)
-        
+
         # Button for completing the setup
         self.btn_ok = QtWidgets.QPushButton('Ok')
         self.btn_ok.clicked.connect(self.update_setup)
         self.btn_ok.clicked.connect(lambda: self.setupCompleted.emit(self.setup))
-        self.setupCompleted.connect(self._save_setup)
+        self.btn_ok.clicked.connect(self._save_setup)
+
+        # Connect signal
+        self.setupCompleted.connect(self.set_read_only)
         
         # Add main layout to widget layout and add ok button
         self.layout().addLayout(self.main_layout)
@@ -134,12 +138,17 @@ class IrradSetup(QtWidgets.QWidget):
         label_server = QtWidgets.QLabel('Server IP:')
         edit_server = QtWidgets.QLineEdit()
         edit_server.setInputMask("000.000.000.000;_")
-        edit_server.textEdited.connect(
-            lambda text: btn_add_server.setEnabled(False if text in server_ips['all'] else True))
+        edit_server.textEdited.connect(lambda text: btn_add_server.setEnabled(False if text in server_ips['all'] else True))
         combo_server = QtWidgets.QComboBox()
         combo_server.setLineEdit(edit_server)
-        combo_server.addItems(server_ips['all'])
-        edit_server.setText(server_ips['default'])
+
+        # Connect server ip edit to signals; on startup, servers are searched for automatically
+        for x in [lambda ip_list, cbx=combo_server: cbx.addItems(ip_list),
+                  lambda ip_list, edt=edit_server, cbx=combo_server: edt.setText(server_ips['default']
+                                                                                 if server_ips['default'] in ip_list
+                                                                                 else cbx.itemText(0))]:
+            self.serverIPsFound.connect(x)
+
         btn_add_server = QtWidgets.QPushButton('Add')
         btn_add_server.setToolTip('Add current IP to list of known servers.')
         btn_add_server.clicked.connect(lambda _: self._add_to_known_servers(ip=edit_server.text()))
@@ -387,8 +396,10 @@ class IrradSetup(QtWidgets.QWidget):
         # Get all input widgets
         edit_widgets = [se[ew] for se in (self.daq_widgets, self.session_widgets) for ew in se if 'edit' in ew]
 
-        # Make lambda func to check whether edit holds text
-        _check = lambda _edit: True if _edit.text() or _edit.placeholderText() else False
+        # Make func to check whether edit holds text
+        def _check(_edit):
+            t = _edit.text() or _edit.placeholderText()
+            return True if t and t != '...' else False
 
         # Loop over all widgets; if one has no text, stop
         i = 0
@@ -449,11 +460,22 @@ class IrradSetup(QtWidgets.QWidget):
         """Returns the host IP address on UNIX systems. If not UNIX, returns None"""
 
         try:
-            host_ip = check_output(['hostname', '-I'])
-        except (OSError, CalledProcessError):
+            host_ip = subprocess.check_output(['hostname', '-I'])
+        except (OSError, subprocess.CalledProcessError):
             host_ip = None
 
         return host_ip
+
+    def _find_available_servers(self):
+
+        available = []
+        for ip in server_ips['all']:
+            p = subprocess.Popen(["ping", "-q", "-c 1", "-W 1", ip], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            res = p.communicate(), p.returncode
+            if res[-1] == 0:
+                available.append(ip)
+
+        self.serverIPsFound.emit(available)
 
     def _save_setup(self):
         """Save setup dict to yaml file and save in output path"""
