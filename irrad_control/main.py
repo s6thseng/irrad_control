@@ -157,6 +157,12 @@ class IrradControlWin(QtWidgets.QMainWindow):
             if name == 'Setup':
                 self.setup_tab = IrradSetup(parent=self)
                 self.setup_tab.setupCompleted.connect(lambda setup: self._init_setup(setup))
+                self.setup_tab.serverIPsFound.connect(lambda ip_list:
+                                                      self.handle_messages(
+                                                          'No servers found'
+                                                          if not ip_list else
+                                                          'Found server(s): {}'.format(', '.join(ip_list))))
+                self.handle_messages('Scanning network for known servers...', 0)
                 self.threadpool.start(Worker(func=self.setup_tab._find_available_servers))
 
                 tw[name] = self.setup_tab
