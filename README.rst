@@ -16,6 +16,7 @@ You have to have Python 2/3 with the following packages installed:
 - scipy
 - pyyaml
 - pyzmq
+- pytables
 - pyqt
 - `pyqtgraph <http://pyqtgraph.org/>`_
 - paramiko
@@ -24,7 +25,7 @@ It's recommended to use a Python environment like `Miniconda <https://conda.io/m
 
 .. code-block:: bash
 
-   conda install numpy scipy pyyaml pyqt pyzmq paramiko
+   conda install numpy scipy pyyaml pytables pyqt pyzmq paramiko
 
 .. code-block:: bash
 
