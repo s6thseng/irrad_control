@@ -187,12 +187,16 @@ class IrradControlWin(QtWidgets.QMainWindow):
         # Start receiving data and log
         self._init_threads()
 
-        # Init server
-        self._init_server()
-
         # Init interpreter
         self.interpreter._init_setup(setup)
         self.interpreter.start()
+
+        # Wait for interpreter to start receive data
+        while not self.interpreter.is_receiving.is_set():
+            time.sleep(1e-2)
+
+        # Init server
+        self._init_server()
 
     def _init_log_dock(self):
         """Initializes corresponding log dock"""
