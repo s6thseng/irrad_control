@@ -146,7 +146,8 @@ class IrradSetup(QtWidgets.QWidget):
         for x in [lambda ip_list, cbx=combo_server: cbx.addItems(ip_list),
                   lambda ip_list, edt=edit_server, cbx=combo_server: edt.setText(server_ips['default']
                                                                                  if server_ips['default'] in ip_list
-                                                                                 else cbx.itemText(0))]:
+                                                                                 else cbx.itemText(0)),
+                  self._check_input]:
             self.serverIPsFound.connect(x)
 
         btn_add_server = QtWidgets.QPushButton('Add')
