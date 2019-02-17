@@ -21,13 +21,19 @@ class IrradInterpreter(multiprocessing.Process):
         In order to change attributes during runtime use multiprocessing.Event objects or queues. 
         """
 
+        # Set name of this interpreter process
         self.name = 'interpreter' if name is None else name
+
+        # Set the maximum table length before flushing data to hard drive
+        self._max_buf_len = 1e6
 
         # Attributes to interact with the actual process stuff running within run()
         self.stop_recv_data = multiprocessing.Event()
         self.stop_write_data = multiprocessing.Event()
+        self.is_receiving = multiprocessing.Event()
 
     def _init_setup(self, setup):
+        """Do the initial setup. These will be copied to the process on launch"""
 
         # General setup
         self.irrad_setup = setup
@@ -85,9 +91,6 @@ class IrradInterpreter(multiprocessing.Process):
         handler = handlers.PUBHandler(log_pub)
         logging.getLogger().addHandler(handler)
 
-        # Allow connections to be made
-        time.sleep(1)
-
     def _setup_daq(self):
 
         # Data writing
@@ -98,11 +101,13 @@ class IrradInterpreter(multiprocessing.Process):
         self.raw_table = {}
         self.beam_table = {}
         self.fluence_table = {}
+        self.result_table =  {}
 
         # Store data per interpretation cycle and ADC
         self.raw_data = {}
         self.beam_data = {}
         self.fluence_data = {}
+        self.result_data = {}
 
         # Possible channels from which to get the beam positions
         self.pos_types = {'h': {'digital': ['sem_left', 'sem_right'], 'analog': ['sem_h_shift']},
@@ -117,6 +122,8 @@ class IrradInterpreter(multiprocessing.Process):
                          ('timestamp_start', '<f4'), ('x_start', '<f4'), ('y_start', '<f4'),
                          ('timestamp_stop', '<f4'), ('x_stop', '<f4'), ('y_stop', '<f4')]
 
+        result_dtype =  [('p_fluence', '<f8'), ('sigma', '<f8')]
+
         # Dict with lists to append beam current values to during scanning
         self._beam_currents = defaultdict(list)
 
@@ -124,7 +131,7 @@ class IrradInterpreter(multiprocessing.Process):
         self.nA = 1e-9
 
         # Elementary charge
-        self._e = 1.60217733e-19
+        self.qe = 1.60217733e-19
 
         # XY stage stuff
         self.n_rows = None
@@ -164,6 +171,7 @@ class IrradInterpreter(multiprocessing.Process):
             self.raw_data[adc] = np.zeros(shape=1, dtype=raw_dtype)
             self.beam_data[adc] = np.zeros(shape=1, dtype=beam_dtype)
             self.fluence_data[adc] = np.zeros(shape=1, dtype=fluence_dtype)
+            self.result_data[adc] = np.zeros(shape=1, dtype=result_dtype)
 
             # Open adc table
             self.tables[adc] = tb.open_file(self.session_setup['outfile'] + '_{}.h5'.format(adc), 'w')
@@ -178,55 +186,15 @@ class IrradInterpreter(multiprocessing.Process):
             self.fluence_table[adc] = self.tables[adc].create_table(self.tables[adc].root,
                                                                     description=self.fluence_data[adc].dtype,
                                                                     name='Fluence')
+            self.result_table[adc] = self.tables[adc].create_table(self.tables[adc].root,
+                                                                    description=self.result_data[adc].dtype,
+                                                                    name='Result')
 
     def interpret_data(self, raw_data):
         """Interpretation of the data"""
 
         # Retrive ADC name, meta data and actual data from raw data dict
         adc, meta_data, data = raw_data['meta']['name'], raw_data['meta'], raw_data['data']
-
-        if meta_data['type'] == 'stage':
-
-            if data['status'] == 'init':
-                self.y_step = data['y_step']
-                self.n_rows = data['n_rows']
-                self._fluence[adc] =  [0] * self.n_rows
-
-            if data['status'] == 'start':
-                del self._beam_currents[adc][:]
-                self._stage_scanning = True
-                self.fluence_data[adc]['timestamp_start'] = meta_data['timestamp']
-
-                for prop in ('scan', 'row', 'speed', 'step', 'x_start', 'y_start'):
-                    self.fluence_data[adc][prop] = data[prop]
-
-            if data['status'] == 'stop':
-                self._stage_scanning = False
-                self.fluence_data[adc]['timestamp_stop'] = meta_data['timestamp']
-
-                for prop in ('x_stop', 'y_stop', 'step'):
-                    self.fluence_data[adc][prop] = data[prop]
-
-                # Do fluence calculation
-                mean_current, std_current = np.mean(self._beam_currents[adc]), np.std(self._beam_currents[adc])
-                p_fluence = mean_current / (self.fluence_data[adc]['step'] * self.fluence_data[adc]['speed'] * self._e)
-                p_fluence_std = std_current / (self.fluence_data[adc]['step'] * self.fluence_data[adc]['speed'] * self._e)
-
-                self.fluence_data[adc]['current'] = mean_current
-                self.fluence_data[adc]['current_std'] = std_current
-                self.fluence_data[adc]['p_fluence'] = p_fluence
-
-                logging.info('Fluence row {}: ({:.2E} +- {:.2E}) protons / cm^2'.format(self.fluence_data[adc]['row'],
-                                                                                        p_fluence, p_fluence_std))
-
-                self._fluence[adc][self.fluence_data[adc]['row']] += self.fluence_data[adc]['p_fluence']
-
-                fluence_data = {'meta': {'timestamp': meta_data['timestamp'], 'name': adc, 'type': 'fluence'},
-                                'data': self._fluence}
-
-                self.data_pub.send_json(fluence_data)
-
-                self._store_fluence_data = True
 
         if meta_data['type'] == 'raw':
 
@@ -300,14 +268,78 @@ class IrradInterpreter(multiprocessing.Process):
 
             self.data_pub.send_json(beam_data)
 
+        if meta_data['type'] == 'stage':
+
+            if data['status'] == 'init':
+                self.y_step = data['y_step']
+                self.n_rows = data['n_rows']
+                self._fluence[adc] =  [0] * self.n_rows
+
+            if data['status'] == 'start':
+                del self._beam_currents[adc][:]
+                self._stage_scanning = True
+                self.fluence_data[adc]['timestamp_start'] = meta_data['timestamp']
+
+                for prop in ('scan', 'row', 'speed', 'step', 'x_start', 'y_start'):
+                    self.fluence_data[adc][prop] = data[prop]
+
+            if data['status'] == 'stop':
+                self._stage_scanning = False
+                self.fluence_data[adc]['timestamp_stop'] = meta_data['timestamp']
+
+                for prop in ('x_stop', 'y_stop', 'step'):
+                    self.fluence_data[adc][prop] = data[prop]
+
+                # Do fluence calculation
+                mean_current, std_current = np.mean(self._beam_currents[adc]), np.std(self._beam_currents[adc])
+                p_fluence = mean_current / (self.y_step* self.fluence_data[adc]['speed'] * self.qe)
+                p_fluence_std = std_current / (self.y_step * self.fluence_data[adc]['speed'] * self.qe)
+
+                self.fluence_data[adc]['current'] = mean_current
+                self.fluence_data[adc]['current_std'] = std_current
+                self.fluence_data[adc]['p_fluence'] = p_fluence
+
+                logging.info('Fluence row {}: ({:.2E} +- {:.2E}) protons / cm^2'.format(self.fluence_data[adc]['row'],
+                                                                                        p_fluence, p_fluence_std))
+
+                self._fluence[adc][self.fluence_data[adc]['row']] += self.fluence_data[adc]['p_fluence']
+
+                fluence_data = {'meta': {'timestamp': meta_data['timestamp'], 'name': adc, 'type': 'fluence'},
+                                'data': self._fluence}
+
+                self.data_pub.send_json(fluence_data)
+
+                self._store_fluence_data = True
+
+            if data['status'] == 'finished':
+
+                # The stage is finished; append the overall fluence to the result and get the sigma by the std dev
+                self.result_data[adc]['p_fluence'] = np.mean(self._fluence[adc])
+                self.result_data[adc]['sigma'] = np.std(self._fluence[adc])
+                self.result_table[adc].append(self.result_data[adc])
+
+                # Write everything to the file
+                self.tables[adc].flush()
+
+                # Stop writing data
+                self.stop_write_data.set()
+
+                # Make sure we're leaving condition with event set so we don't add data to the table
+                while not self.stop_write_data.is_set():
+                    time.sleep(1e-3)
+
+        # During scan, store all beam currents in order to get mean current over scanned row
         if self._stage_scanning:
             self._beam_currents[adc].append(self.beam_data[adc]['current_analog'])
 
     def _calc_digital_shift(self, data, adc, ch_types, m='h'):
+        """Calculate the beam displacement on the secondary electron monitor from the digitized foil signals"""
 
+        # Get indices of respective foil signals in data and extract
         idx_a, idx_b = self.ch_type_idx[adc][ch_types[0]], self.ch_type_idx[adc][ch_types[1]]
         a, b = data[self.channels[adc][idx_a]], data[self.channels[adc][idx_b]]
 
+        # Do calc and catch ZeroDivisionError
         try:
             res = (a - b) / (a + b)
         except ZeroDivisionError:
@@ -317,22 +349,35 @@ class IrradInterpreter(multiprocessing.Process):
         return res if res is None else -1 * res if m == 'h' else res
 
     def store_data(self):
+        """Method which appends current data to table files. If tables are longer then self._max_buf_len,
+        flush the buffer to hard drive"""
 
+        # Loop over tables and append the data
         for adc in self.tables:
             self.raw_table[adc].append(self.raw_data[adc])
             self.beam_table[adc].append(self.beam_data[adc])
 
+            # If the stage scanned, append data
             if self._store_fluence_data:
                 self.fluence_table[adc].append(self.fluence_data[adc])
                 self._store_fluence_data = False
 
+            # If tables are getting too large, flush buffer to hard drive
+            if any(t[adc].nrows % self._max_buf_len == 0 and t[adc].nrows != 0 for t in (self.raw_table,
+                                                                                         self.beam_table,
+                                                                                         self.fluence_table)):
+                self.tables[adc].flush()
+
     def recv_data(self):
-        """Method that is run on different thread which receives raw data and calls interpretation method"""
+        """Main method which receives raw data and calls interpretation and data storage methods"""
 
         # Create subscriber for raw and XY-Stage data
         data_sub = self.context.socket(zmq.SUB)
         data_sub.connect(self._tcp_addr(self.tcp_setup['port']['data'], ip=self.tcp_setup['ip']['server']))
         data_sub.setsockopt(zmq.SUBSCRIBE, '')
+
+        # Set signal for main to proceed
+        self.is_receiving.set()
 
         # While event not set receive data with 1 ms wait
         while not self.stop_recv_data.wait(1e-3):
@@ -346,31 +391,47 @@ class IrradInterpreter(multiprocessing.Process):
                 self.interpret_data(data)
 
                 # If event is not set, store data to hdf5 file
-                if not self.stop_write_data.is_set():
+                if not self.stop_write_data.wait(1e-3):
                     self.store_data()
 
-            except zmq.Again:  # no data
+            # No data
+            except zmq.Again:
                 pass
 
     def shutdown(self):
+        """Set events in order to leave receiver loop and end process"""
+
+        # User info
+        logging.info('Shutting down {}...'.format(self.name.capitalize()))
+
+        # Setting signals to stop
         self.stop_write_data.set()
         self.stop_recv_data.set()
 
     def _close_tables(self):
+        """Method to close the h5-files which were opened in the setup_daq method"""
+
+        # User info
+        logging.info('Closing data files {}'.format(', '.join(self.tables[adc].filename for adc in self.tables)))
+
+        # Loop over all ADCs and close
         for adc in self.tables:
             self.tables[adc].close()
 
     def run(self):
+        """This will be run in a dedicated process on calling the Process.start() method"""
 
         # Setup interpreters zmq connections and logging and daq
         self._setup_interpreter()
 
+        # User info
         logging.info('Starting {}'.format(self.name))
 
         # Main process runs command receive loop
         self.recv_data()
 
-        # Close opened data tables
+        # Close opened data files
         self._close_tables()
 
-        logging.info('{} finished'.format(self.name))
+        # User info
+        logging.info('{} finished'.format(self.name.capitalize()))
