@@ -30,9 +30,12 @@ class IrradServer(multiprocessing.Process):
 
         # Attribute to hold beam current; needed for XY-Stage as scan criteria
         self.beam_current = None
+
+        # Minimum beam current
+        self.min_beam_current = None
         
         # Dict of known commands
-        self.commands = {'server': ['start'], 'adc': [], 'stage': []}
+        self.commands = {'server': ['start', 'set_current', 'set_min_current'], 'adc': [], 'stage': []}
 
         # Attribute to store setup in
         self.irrad_setup = None
@@ -203,6 +206,16 @@ class IrradServer(multiprocessing.Process):
 
                 # Send reply which is PID of this process
                 self._send_reply(reply='pid', data=self.ident, sender='server', _type='STANDARD')
+
+            if cmd == 'set_current':
+                self.beam_current = cmd_data
+
+                self._send_reply(reply='current', _type='STANDARD', sender='server', data=self.beam_current)
+
+            if cmd == 'set_min_current':
+                self.min_beam_current = cmd_data
+
+                self._send_reply(reply='min_current', _type='STANDARD', sender='server', data=self.min_beam_current)
 
         # Set busy False after executed cmd
         self._busy_cmd = False
