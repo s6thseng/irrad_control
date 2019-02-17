@@ -89,7 +89,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         self.setWindowTitle(PROJECT_NAME)
         self.screen = QtWidgets.QDesktopWidget().screenGeometry()
         self.setMinimumSize(MINIMUM_RESOLUTION[0], MINIMUM_RESOLUTION[1])
-        self.resize(0.8 * self.screen.width(), 0.8 * self.screen.height())
+        self.resize(self.screen.width(), self.screen.height())
         self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
 
         # Create main layout
@@ -177,6 +177,9 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         # Store setup
         self.setup = setup
+
+        # Adjust logging level
+        logging.getLogger().setLevel(setup['session']['loglevel'])
 
         # Update tab widgets accordingly
         self.update_tabs()
@@ -319,6 +322,9 @@ class IrradControlWin(QtWidgets.QMainWindow):
             _data = {'meta': data['meta'], 'data': data['data']['current']}
             self.monitor_tab.plots[adc]['current_plot'].set_data(_data)
 
+            # Set current beam current attribute in server process
+            self.send_cmd(target='server', cmd='set_current', cmd_data=_data['data']['analog'])
+
         # Check whether data is interpreted
         elif data['meta']['type'] == 'fluence':
             self.monitor_tab.plots[adc]['fluence_plot'].set_data(data)
@@ -367,6 +373,14 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
                     self.server.set_server_pid(reply_data)
                     self.tabs.setCurrentIndex(self.tabs.indexOf(self.monitor_tab))
+
+                if reply == 'current':
+
+                    logging.debug('Beam current set to {}'.format(reply_data))
+
+                if reply == 'min_current':
+
+                    logging.debug('Minimum beam current set to {}'.format(reply_data))
 
         elif _type == 'ERROR':
             msg = '{} error occured: {}'.format(sender.capitalize(), reply)
