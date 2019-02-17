@@ -625,16 +625,16 @@ class FluenceHist(IrradPlotWidget):
         # Meta data and data
         _meta, _data = data['meta'], data['data']
 
-        fluence = data['data']['fluence']['hist']
-        mean = data['data']['fluence']['mean']
-        std = data['data']['fluence']['std']
+        fluence = data['data']['hist']
+        mean = data['data']['mean']
+        std = data['data']['std']
 
-        self.curves['hist'].setData(fluence, stepMode=True)
+        self.curves['hist'].setData(range(len(fluence) + 1), fluence, stepMode=True)
         self.curves['mean'].setValue(mean)
 
         p_label = 'Mean: ({:.2E} +- {:.2E}) protons / cm^2'.format(mean, std)
         self.p_label.setFormat(p_label)
-        n_label = 'Mean: ({:.2E} +- {:.2E}) neq / cm^2'.format((x * self.irrad_setup['kappa'] for x in (mean, std)))
+        n_label = 'Mean: ({:.2E} +- {:.2E}) neq / cm^2'.format(*[x * self.irrad_setup['kappa'] for x in (mean, std)])
         self.n_label.setFormat(n_label)
 
 

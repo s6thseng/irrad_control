@@ -280,32 +280,34 @@ class IrradInterpreter(multiprocessing.Process):
                 self._stage_scanning = True
                 self.fluence_data[adc]['timestamp_start'] = meta_data['timestamp']
 
-                for prop in ('scan', 'row', 'speed', 'step', 'x_start', 'y_start'):
+                for prop in ('scan', 'row', 'speed', 'x_start', 'y_start'):
                     self.fluence_data[adc][prop] = data[prop]
 
             if data['status'] == 'stop':
                 self._stage_scanning = False
                 self.fluence_data[adc]['timestamp_stop'] = meta_data['timestamp']
 
-                for prop in ('x_stop', 'y_stop', 'step'):
+                for prop in ('x_stop', 'y_stop'):
                     self.fluence_data[adc][prop] = data[prop]
 
                 # Do fluence calculation
                 mean_current, std_current = np.mean(self._beam_currents[adc]), np.std(self._beam_currents[adc])
-                p_fluence = mean_current / (self.y_step* self.fluence_data[adc]['speed'] * self.qe)
-                p_fluence_std = std_current / (self.y_step * self.fluence_data[adc]['speed'] * self.qe)
+                p_fluence = mean_current / (self.y_step* self.fluence_data[adc]['speed'][0] * self.qe)
+                p_fluence_std = std_current / (self.y_step * self.fluence_data[adc]['speed'][0] * self.qe)
 
                 self.fluence_data[adc]['current'] = mean_current
                 self.fluence_data[adc]['current_std'] = std_current
                 self.fluence_data[adc]['p_fluence'] = p_fluence
+                self.fluence_data[adc]['step'] = self.y_step
 
-                logging.info('Fluence row {}: ({:.2E} +- {:.2E}) protons / cm^2'.format(self.fluence_data[adc]['row'],
+                logging.info('Fluence row {}: ({:.2E} +- {:.2E}) protons / cm^2'.format(self.fluence_data[adc]['row'][0],
                                                                                         p_fluence, p_fluence_std))
 
-                self._fluence[adc][self.fluence_data[adc]['row']] += self.fluence_data[adc]['p_fluence']
+                self._fluence[adc][self.fluence_data[adc]['row'][0]] += self.fluence_data[adc]['p_fluence'][0]
 
                 fluence_data = {'meta': {'timestamp': meta_data['timestamp'], 'name': adc, 'type': 'fluence'},
-                                'data': self._fluence}
+                                'data': {'hist': self._fluence[adc], 'mean': np.mean(self._fluence[adc]),
+                                         'std': np.std(self._fluence[adc])}}
 
                 self.data_pub.send_json(fluence_data)
 
@@ -330,7 +332,7 @@ class IrradInterpreter(multiprocessing.Process):
 
         # During scan, store all beam currents in order to get mean current over scanned row
         if self._stage_scanning:
-            self._beam_currents[adc].append(self.beam_data[adc]['current_analog'])
+            self._beam_currents[adc].append(self.beam_data[adc]['current_analog'][0])
 
     def _calc_digital_shift(self, data, adc, ch_types, m='h'):
         """Calculate the beam displacement on the secondary electron monitor from the digitized foil signals"""
