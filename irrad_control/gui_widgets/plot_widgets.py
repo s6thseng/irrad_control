@@ -608,6 +608,8 @@ class FluenceHist(IrradPlotWidget):
         hist_curve.setFillLevel(0.33)
         hist_curve.setBrush(pg.mkBrush(color=MPL_COLORS[0]))
 
+        hist_errors = pg.ErrorBarItem(x=np.arange(1), y=np.arange(1))
+
         # Horizontal line indication the mean fluence over all rows
         mean_curve = pg.InfiniteLine(angle=0)
         mean_curve.setPen(color=MPL_COLORS[1], width=2)
@@ -626,10 +628,13 @@ class FluenceHist(IrradPlotWidget):
         _meta, _data = data['meta'], data['data']
 
         fluence = data['data']['hist']
-        mean = data['data']['mean']
-        std = data['data']['std']
+        fluence_err = data['data']['hist_err']
+        mean = np.mean(fluence)
+        std = np.std(fluence)
 
         self.curves['hist'].setData(range(len(fluence) + 1), fluence, stepMode=True)
+        #self.curves['hist_err'].setData(x=np.arange(fluence.shape[0]) + 0.5, y=fluence,
+        #                                height=fluence_err, pen=MPL_COLORS[2])
         self.curves['mean'].setValue(mean)
 
         p_label = 'Mean: ({:.2E} +- {:.2E}) protons / cm^2'.format(mean, std)
