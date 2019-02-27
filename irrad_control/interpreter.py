@@ -117,9 +117,9 @@ class IrradInterpreter(multiprocessing.Process):
         self.current_types = {'digital': [('sem_left', 'sem_right'), ('sem_up', 'sem_down')], 'analog': 'sem_sum'}
 
         # Dtype for fluence data
-        fluence_dtype = [('scan', '<i4'), ('row', '<i4'), ('current', '<f4'), ('current_std', '<f4'),
-                         ('speed', '<f4'), ('step', '<f4'), ('p_fluence', '<f8'),
-                         ('timestamp_start', '<f4'), ('x_start', '<f4'), ('y_start', '<f4'),
+        fluence_dtype = [('scan', '<i4'), ('row', '<i4'), ('current_mean', '<f4'), ('current_std', '<f4'),
+                         ('current_err', '<f4'), ('speed', '<f4'), ('step', '<f4'), ('p_fluence', '<f8'),
+                         ('p_fluence_err', '<f8'), ('timestamp_start', '<f4'), ('x_start', '<f4'), ('y_start', '<f4'),
                          ('timestamp_stop', '<f4'), ('x_stop', '<f4'), ('y_stop', '<f4')]
 
         result_dtype =  [('p_fluence', '<f8'), ('sigma', '<f8')]
@@ -143,6 +143,7 @@ class IrradInterpreter(multiprocessing.Process):
 
         # Fluence
         self._fluence = {}
+        self._fluence_err = {}
 
         # Open respective table files per ADC and check which data will be interpreted
         for adc in self.channels:
@@ -273,7 +274,8 @@ class IrradInterpreter(multiprocessing.Process):
             if data['status'] == 'init':
                 self.y_step = data['y_step']
                 self.n_rows = data['n_rows']
-                self._fluence[adc] =  [0] * self.n_rows
+                self._fluence[adc] = [0] * self.n_rows
+                self._fluence_err[adc] = [0] * self.n_rows
 
             if data['status'] == 'start':
                 del self._beam_currents[adc][:]
@@ -291,27 +293,49 @@ class IrradInterpreter(multiprocessing.Process):
                     self.fluence_data[adc][prop] = data[prop]
 
                 # Do fluence calculation
+                # Mean current over scanning time
                 mean_current, std_current = np.mean(self._beam_currents[adc]), np.std(self._beam_currents[adc])
-                p_fluence = mean_current / (self.y_step* self.fluence_data[adc]['speed'][0] * self.qe)
-                p_fluence_std = std_current / (self.y_step * self.fluence_data[adc]['speed'][0] * self.qe)
 
-                self.fluence_data[adc]['current'] = mean_current
+                # Error on current measurement is Delta I = 3.3% I + 1% R_FS
+                actual_current_error = 0.033 * mean_current + 0.01 * self.daq_setup[adc]['ro_scale']
+
+                # Error for fluence error calculation ; take either actual current error or current fluctuations
+                # depending on which has the higher uncertainty
+                p_f_err = std_current if std_current > actual_current_error else actual_current_error
+
+                # Fluence and its error
+                p_fluence = mean_current / (self.y_step * self.fluence_data[adc]['speed'][0] * self.qe)
+                p_fluence_err = p_f_err / (self.y_step * self.fluence_data[adc]['speed'][0] * self.qe)
+
+                # Write to array
+                self.fluence_data[adc]['current_mean'] = mean_current
                 self.fluence_data[adc]['current_std'] = std_current
+                self.fluence_data[adc]['current_err'] = actual_current_error
                 self.fluence_data[adc]['p_fluence'] = p_fluence
+                self.fluence_data[adc]['p_fluence_err'] = p_fluence_err
                 self.fluence_data[adc]['step'] = self.y_step
 
+                # User feedback
                 logging.info('Fluence row {}: ({:.2E} +- {:.2E}) protons / cm^2'.format(self.fluence_data[adc]['row'][0],
-                                                                                        p_fluence, p_fluence_std))
+                                                                                        p_fluence, p_fluence_err))
 
+                # Add to overall fluence
                 self._fluence[adc][self.fluence_data[adc]['row'][0]] += self.fluence_data[adc]['p_fluence'][0]
 
-                fluence_data = {'meta': {'timestamp': meta_data['timestamp'], 'name': adc, 'type': 'fluence'},
-                                'data': {'hist': self._fluence[adc], 'mean': np.mean(self._fluence[adc]),
-                                         'std': np.std(self._fluence[adc])}}
+                # Update the error a la Gaussian error propagation
+                old_fluence_err = self._fluence_err[adc][self.fluence_data[adc]['row'][0]]
+                current_fluence_err = self.fluence_data[adc]['p_fluence_err'][0]
+                new_fluence_err = np.sqrt(old_fluence_err**2.0 + current_fluence_err**2.0)
 
-                self.data_pub.send_json(fluence_data)
+                # Update
+                self._fluence_err[adc][self.fluence_data[adc]['row'][0]] = new_fluence_err
+
+                fluence_data = {'meta': {'timestamp': meta_data['timestamp'], 'name': adc, 'type': 'fluence'},
+                                'data': {'hist': self._fluence[adc], 'hist_err': self._fluence_err[adc]}}
 
                 self._store_fluence_data = True
+
+                self.data_pub.send_json(fluence_data)
 
             if data['status'] == 'finished':
 
