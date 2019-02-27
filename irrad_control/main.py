@@ -170,6 +170,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
                 tw[name] = QtWidgets.QWidget()
 
             self.tabs.addTab(tw[name], name)
+            self.tabs.setTabEnabled(self.tabs.indexOf(tw[name]), name in ['Setup'])
 
     def _init_setup(self, setup):
 
