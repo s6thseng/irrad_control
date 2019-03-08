@@ -608,7 +608,15 @@ class FluenceHist(IrradPlotWidget):
         hist_curve.setFillLevel(0.33)
         hist_curve.setBrush(pg.mkBrush(color=MPL_COLORS[0]))
 
-        hist_errors = pg.ErrorBarItem(x=np.arange(1), y=np.arange(1))
+        # Points at respective row positions
+        hist_points = pg.ScatterPlotItem()
+        hist_points.setPen(color=MPL_COLORS[2], style=pg.QtCore.Qt.SolidLine)
+        hist_points.setBrush(color=MPL_COLORS[2])
+        hist_points.setSymbol('o')
+        hist_points.setSize(10)
+
+        # Errorbars for points; needs to initialized with x, y args, otherwise cnnot be added to PlotItem
+        hist_errors = pg.ErrorBarItem(x=np.arange(1), y=np.arange(1), beam=0.25)
 
         # Horizontal line indication the mean fluence over all rows
         mean_curve = pg.InfiniteLine(angle=0)
@@ -616,7 +624,8 @@ class FluenceHist(IrradPlotWidget):
         self.p_label = pg.InfLineLabel(mean_curve, position=0.2)
         self.n_label = pg.InfLineLabel(mean_curve, position=0.8)
 
-        self.curves = OrderedDict([('hist', hist_curve), ('mean', mean_curve)])
+        self.curves = OrderedDict([('hist', hist_curve), ('hist_points', hist_points),
+                                   ('hist_errors', hist_errors), ('mean', mean_curve)])
 
         # Show data and legend
         for curve in self.curves:
@@ -633,8 +642,9 @@ class FluenceHist(IrradPlotWidget):
         std = np.std(fluence)
 
         self.curves['hist'].setData(range(len(fluence) + 1), fluence, stepMode=True)
-        #self.curves['hist_err'].setData(x=np.arange(fluence.shape[0]) + 0.5, y=fluence,
-        #                                height=fluence_err, pen=MPL_COLORS[2])
+        self.curves['hist_points'].setData(x=np.arange(len(fluence)) + 0.5, y=fluence)
+        self.curves['hist_errors'].setData(x=np.arange(len(fluence)) + 0.5, y=fluence,
+                                        height=np.array(fluence_err), pen=MPL_COLORS[2])
         self.curves['mean'].setValue(mean)
 
         p_label = 'Mean: ({:.2E} +- {:.2E}) protons / cm^2'.format(mean, std)
