@@ -651,7 +651,3 @@ class FluenceHist(IrradPlotWidget):
         self.p_label.setFormat(p_label)
         n_label = 'Mean: ({:.2E} +- {:.2E}) neq / cm^2'.format(*[x * self.irrad_setup['kappa'] for x in (mean, std)])
         self.n_label.setFormat(n_label)
-
-
-class FluenceMap(pg.ViewBox):
-    pass
