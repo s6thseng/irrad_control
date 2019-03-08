@@ -119,10 +119,10 @@ class IrradInterpreter(multiprocessing.Process):
         # Dtype for fluence data
         fluence_dtype = [('scan', '<i4'), ('row', '<i4'), ('current_mean', '<f4'), ('current_std', '<f4'),
                          ('current_err', '<f4'), ('speed', '<f4'), ('step', '<f4'), ('p_fluence', '<f8'),
-                         ('p_fluence_err', '<f8'), ('timestamp_start', '<f4'), ('x_start', '<f4'), ('y_start', '<f4'),
-                         ('timestamp_stop', '<f4'), ('x_stop', '<f4'), ('y_stop', '<f4')]
+                         ('p_fluence_err', '<f8'), ('timestamp_start', '<f8'), ('x_start', '<f4'), ('y_start', '<f4'),
+                         ('timestamp_stop', '<f8'), ('x_stop', '<f4'), ('y_stop', '<f4')]
 
-        result_dtype =  [('p_fluence', '<f8'), ('sigma', '<f8')]
+        result_dtype =  [('p_fluence_mean', '<f8'), ('p_fluence_err', '<f8'), ('p_fluence_std', '<f8')]
 
         # Dict with lists to append beam current values to during scanning
         self._beam_currents = defaultdict(list)
@@ -297,11 +297,10 @@ class IrradInterpreter(multiprocessing.Process):
                 mean_current, std_current = np.mean(self._beam_currents[adc]), np.std(self._beam_currents[adc])
 
                 # Error on current measurement is Delta I = 3.3% I + 1% R_FS
-                actual_current_error = 0.033 * mean_current + 0.01 * self.daq_setup[adc]['ro_scale']
+                actual_current_error = 0.033 * mean_current + 0.01 * self.daq_setup[adc]['ro_scale'] * self.nA
 
-                # Error for fluence error calculation ; take either actual current error or current fluctuations
-                # depending on which has the higher uncertainty
-                p_f_err = std_current if std_current > actual_current_error else actual_current_error
+                # Quadratically add the measurement error and beam current fluctuation
+                p_f_err = np.sqrt(std_current**2. + actual_current_error**2.)
 
                 # Fluence and its error
                 p_fluence = mean_current / (self.y_step * self.fluence_data[adc]['speed'][0] * self.qe)
@@ -340,8 +339,9 @@ class IrradInterpreter(multiprocessing.Process):
             if data['status'] == 'finished':
 
                 # The stage is finished; append the overall fluence to the result and get the sigma by the std dev
-                self.result_data[adc]['p_fluence'] = np.mean(self._fluence[adc])
-                self.result_data[adc]['sigma'] = np.std(self._fluence[adc])
+                self.result_data[adc]['p_fluence_mean'] = np.mean(self._fluence[adc])
+                self.result_data[adc]['p_fluence_err'] = np.sqrt(np.sum(np.power(np.array(self._fluence_err[adc]) / len(self._fluence[adc]), 2.)))
+                self.result_data[adc]['p_fluence_std'] = np.std(self._fluence[adc])
                 self.result_table[adc].append(self.result_data[adc])
 
                 # Write everything to the file
