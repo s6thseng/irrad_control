@@ -15,6 +15,7 @@ from irrad_control.utils.worker import Worker
 from irrad_control.utils.server_manager import ServerManager
 from irrad_control.gui_widgets.daq_info_widget import DaqInfoWidget
 from irrad_control.gui_widgets.monitor_tab import IrradMonitor
+from irrad_control.gui_widgets.control_tab import IrradControl
 from irrad_control.gui_widgets.setup_tab import IrradSetup
 from irrad_control.interpreter import IrradInterpreter
 
@@ -287,10 +288,11 @@ class IrradControlWin(QtWidgets.QMainWindow):
         current_tab = self.tabs.currentIndex()
 
         # Create missing tabs
-        self.control_tab = QtWidgets.QWidget(parent=self.tabs)
+        self.control_tab = IrradControl(irrad_setup=self.setup, parent=self.tabs)
         self.monitor_tab = IrradMonitor(daq_setup=self.setup['daq'], parent=self.tabs)
 
-        # TODO: connections of control tab
+        # Connect control tab
+        self.control_tab.sendStageCmd.connect(lambda cmd_dict: self.send_cmd(**cmd_dict))
 
         # Make temporary dict for updated tabs
         tmp_tw = {'Control': self.control_tab, 'Monitor': self.monitor_tab}
