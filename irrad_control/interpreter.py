@@ -302,9 +302,9 @@ class IrradInterpreter(multiprocessing.Process):
                 # Quadratically add the measurement error and beam current fluctuation
                 p_f_err = np.sqrt(std_current**2. + actual_current_error**2.)
 
-                # Fluence and its error
-                p_fluence = mean_current / (self.y_step * self.fluence_data[adc]['speed'][0] * self.qe)
-                p_fluence_err = p_f_err / (self.y_step * self.fluence_data[adc]['speed'][0] * self.qe)
+                # Fluence and its error; speed and step_size are in mm; factor 1e-2 to convert to cm^2
+                p_fluence = mean_current / (self.y_step * self.fluence_data[adc]['speed'][0] * self.qe * 1e-2)
+                p_fluence_err = p_f_err / (self.y_step * self.fluence_data[adc]['speed'][0] * self.qe * 1e-2)
 
                 # Write to array
                 self.fluence_data[adc]['current_mean'] = mean_current
@@ -399,7 +399,8 @@ class IrradInterpreter(multiprocessing.Process):
 
         # Create subscriber for raw and XY-Stage data
         data_sub = self.context.socket(zmq.SUB)
-        data_sub.connect(self._tcp_addr(self.tcp_setup['port']['data'], ip=self.tcp_setup['ip']['server']))
+        for port in ('data', 'stage'):
+            data_sub.connect(self._tcp_addr(self.tcp_setup['port'][port], ip=self.tcp_setup['ip']['server']))
         data_sub.setsockopt(zmq.SUBSCRIBE, '')
 
         # Set signal for main to proceed

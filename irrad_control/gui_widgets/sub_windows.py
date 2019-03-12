@@ -12,9 +12,9 @@ class ZmqSetupWindow(QtWidgets.QMainWindow):
 
         self.window_title = '%sMQ setup' % u'\u00D8'
 
-        self.default_ports = OrderedDict([('log', 8500), ('data', 8600), ('cmd', 8700)])
+        self.default_ports = OrderedDict([('log', 8500), ('data', 8600), ('cmd', 8700), ('stage', 8800)])
 
-        self.ports = OrderedDict([(k, self.default_ports[k]) for k in self.default_ports ])
+        self.ports = OrderedDict([(k, self.default_ports[k]) for k in self.default_ports])
 
         self.edits = {}
 

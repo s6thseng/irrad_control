@@ -8,6 +8,7 @@ from zmq.log import handlers
 from adc.ADS1256_definitions import *
 from adc.ADS1256_drates import ads1256_drates
 from adc.pipyadc import ADS1256
+from xystage import ZaberXYStage
 
 
 class IrradServer(multiprocessing.Process):
@@ -35,7 +36,8 @@ class IrradServer(multiprocessing.Process):
         self.min_beam_current = None
         
         # Dict of known commands
-        self.commands = {'server': ['start', 'set_current', 'set_min_current'], 'adc': [], 'stage': []}
+        self.commands = {'server': ['start', 'set_current', 'set_min_current'], 'adc': [],
+                         'stage': ['move_rel', 'move_abs', 'prepare', 'scan', 'estop', 'pos', 'home', 'set_speed', 'get_speed']}
 
         # Attribute to store setup in
         self.irrad_setup = None
@@ -115,6 +117,10 @@ class IrradServer(multiprocessing.Process):
         # Start data sending thread
         data_thread = threading.Thread(target=self.send_data)
         data_thread.start()
+
+        # Setup stage
+        self.xy_stage = ZaberXYStage()
+        self.xy_stage.update_setup(self.irrad_setup)
 
     def send_data(self):
         """Sends data from dedicated thread"""
@@ -216,6 +222,75 @@ class IrradServer(multiprocessing.Process):
                 self.min_beam_current = cmd_data
 
                 self._send_reply(reply='min_current', _type='STANDARD', sender='server', data=self.min_beam_current)
+
+        elif target == 'stage':
+
+            if cmd == 'move_rel':
+                axis = cmd_data['axis']
+                _data = None
+                if axis == 'x':
+                    self.xy_stage.move_horizontal(cmd_data['distance'], unit=cmd_data['unit'])
+                    _data = self.xy_stage.microstep * self.xy_stage.x_axis.get_position()
+                elif axis == 'y':
+                    self.xy_stage.move_vertical(cmd_data['distance'], unit=cmd_data['unit'])
+                    _data = self.xy_stage.microstep * self.xy_stage.y_axis.get_position()
+
+                self._send_reply(reply='move_rel', _type='STANDARD', sender='stage', data=_data)
+
+            if cmd == 'move_abs':
+                axis = cmd_data['axis']
+                _data = None
+                dist_steps = self.xy_stage.distance_to_steps(cmd_data['distance'], unit=cmd_data['unit'])
+                if axis == 'x':
+                    self.xy_stage.x_axis.move_abs(dist_steps)
+                    _data = self.xy_stage.microstep * self.xy_stage.x_axis.get_position()
+                elif axis == 'y':
+                    self.xy_stage.y_axis.move_abs(dist_steps)
+                    _data = self.xy_stage.microstep * self.xy_stage.y_axis.get_position()
+
+                self._send_reply(reply='move_abs', _type='STANDARD', sender='stage', data=_data)
+
+            if cmd == 'set_speed':
+                axis = cmd_data['axis']
+                speed = self.xy_stage.speed_to_step_s(cmd_data['speed'], unit=cmd_data['unit'])
+                if axis == 'x':
+                    self.xy_stage.set_speed(speed, self.xy_stage.x_axis)
+                elif axis == 'y':
+                    self.xy_stage.set_speed(speed, self.xy_stage.y_axis)
+
+                self._send_reply(reply='set_speed', _type='STANDARD', sender='stage')
+
+            if cmd == 'prepare':
+                self.xy_stage.prepare_scan(**cmd_data)
+                _data = {'n_rows': self.xy_stage.n_rows,
+                         'n_scans': self.xy_stage.n_scans,
+                         'scan_speed': self.xy_stage.scan_speed,
+                         'step_size': self.xy_stage.step_size}
+
+                self._send_reply(reply='prepare', _type='STANDARD', sender='stage', data=_data)
+
+            if cmd == 'scan':
+                self.xy_stage.do_scan()
+                self._send_reply(reply='scan', _type='STANDARD', sender='stage')
+
+            if cmd == 'estop':
+                self.xy_stage.emergency_stop.set()
+                self._send_reply(reply='estop', _type='STANDARD', sender='stage')
+
+            if cmd == 'pos':
+                pos = [x.get_position() * self.xy_stage.microstep for x in (self.xy_stage.x_axis, self.xy_stage.y_axis)]
+                pos[1] = self.xy_stage.microstep * self.xy_stage.y_range_steps[-1] - pos[1]
+                self._send_reply(reply='pos', _type='STANDARD', sender='stage', data=pos)
+
+            if cmd == 'get_speed':
+                speed = [self.xy_stage.get_speed(a) for a in (self.xy_stage.x_axis, self.xy_stage.y_axis)]
+                speed = [self.xy_stage.speed_to_mm_s(s) for s in speed]
+                self._send_reply(reply='get_speed', _type='STANDARD', sender='stage', data=speed)
+
+            if cmd == 'home':
+                self.xy_stage.home_x_axis()
+                self.xy_stage.home_y_axis()
+                self._send_reply(reply='home', _type='STANDARD', sender='stage')
 
         # Set busy False after executed cmd
         self._busy_cmd = False

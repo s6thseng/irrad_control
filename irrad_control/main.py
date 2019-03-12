@@ -293,6 +293,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         # Connect control tab
         self.control_tab.sendStageCmd.connect(lambda cmd_dict: self.send_cmd(**cmd_dict))
+        self.control_tab.scanPrepared.connect(lambda cmd_dict: self.monitor_tab.add_fluence_hist(**cmd_dict))
 
         # Make temporary dict for updated tabs
         tmp_tw = {'Control': self.control_tab, 'Monitor': self.monitor_tab}
@@ -326,7 +327,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
             self.monitor_tab.plots[adc]['current_plot'].set_data(_data)
 
             # Set current beam current attribute in server process
-            self.send_cmd(target='server', cmd='set_current', cmd_data=_data['data']['analog'])
+            #self.send_cmd(target='server', cmd='set_current', cmd_data=_data['data']['analog'])
 
         # Check whether data is interpreted
         elif data['meta']['type'] == 'fluence':
@@ -385,6 +386,17 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
                     logging.debug('Minimum beam current set to {}'.format(reply_data))
 
+            if sender == 'stage':
+
+                if reply == 'pos':
+                    self.control_tab.update_position(reply_data)
+
+                if reply == 'get_speed':
+                    self.control_tab.update_speed(reply_data)
+
+                if reply == 'prepare':
+                    self.control_tab.update_prepare(reply_data)
+
         elif _type == 'ERROR':
             msg = '{} error occured: {}'.format(sender.capitalize(), reply)
             logging.error(msg)
@@ -401,6 +413,9 @@ class IrradControlWin(QtWidgets.QMainWindow):
         # Connect to data from remote server and local interpreter process
         for ip in (self.setup['tcp']['ip']['server'], 'localhost'):
             data_sub.connect(self._tcp_addr(self.setup['tcp']['port']['data'], ip=ip))
+
+        # Connect to stage data
+        data_sub.connect(self._tcp_addr(self.setup['tcp']['port']['stage'], ip=self.setup['tcp']['ip']['server']))
 
         data_sub.setsockopt(zmq.SUBSCRIBE, '')
         

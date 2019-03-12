@@ -14,6 +14,7 @@ class IrradMonitor(QtWidgets.QWidget):
         self.monitors = ('raw', 'beam', 'fluence')
 
         self.daq_tabs = QtWidgets.QTabWidget()
+        self.monitor_tabs = {}
 
         self.setLayout(QtWidgets.QVBoxLayout())
         self.layout().addWidget(self.daq_tabs)
@@ -29,9 +30,12 @@ class IrradMonitor(QtWidgets.QWidget):
             self.plots[adc] = OrderedDict()
 
             # Tabs per adc/daq device
-            monitor_tabs = QtWidgets.QTabWidget()
+            self.monitor_tabs[adc] = QtWidgets.QTabWidget()
 
             for monitor in self.monitors:
+
+                if monitor == 'fluence':
+                    continue
 
                 if monitor == 'raw':
 
@@ -54,10 +58,19 @@ class IrradMonitor(QtWidgets.QWidget):
                     monitor_widget.addWidget(beam_current_wrapper)
                     monitor_widget.addWidget(beam_pos_wrapper)
 
-                elif monitor == 'fluence':
-                    self.plots[adc]['fluence_plot'] = FluenceHist(irrad_setup={'n_rows': 50, 'kappa': 3})
-                    monitor_widget = PlotWrapperWidget(self.plots[adc]['fluence_plot'])
+                #elif monitor == 'fluence':
+                #    self.plots[adc]['fluence_plot'] = FluenceHist(irrad_setup={'n_rows': 50, 'kappa': 3})
+                #    monitor_widget = PlotWrapperWidget(self.plots[adc]['fluence_plot'])
 
-                monitor_tabs.addTab(monitor_widget, monitor.capitalize())
+                self.monitor_tabs[adc].addTab(monitor_widget, monitor.capitalize())
 
-            self.daq_tabs.addTab(monitor_tabs, adc)
+            self.daq_tabs.addTab(self.monitor_tabs[adc], adc)
+
+    def add_fluence_hist(self, n_rows, kappa):
+
+        for adc in self.daq_setup:
+
+            self.plots[adc]['fluence_plot'] = FluenceHist(irrad_setup={'n_rows': n_rows, 'kappa': kappa})
+            monitor_widget = PlotWrapperWidget(self.plots[adc]['fluence_plot'])
+            self.monitor_tabs[adc].addTab(monitor_widget, 'Fluence')
+
