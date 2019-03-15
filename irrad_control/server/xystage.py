@@ -279,11 +279,11 @@ class ZaberXYStage:
         self.origin = (self.x_axis.get_position(), self.y_axis.get_position())
 
         # Scan start position
-        self.start_scan = (self.origin[0] + self.distance_to_steps(rel_start_point[0]),
+        self.start_scan = (self.origin[0] - self.distance_to_steps(rel_start_point[0]),
                            self.origin[1] - self.distance_to_steps(rel_start_point[1]))  # inverted y-axis
 
         # Scan start position
-        self.end_scan = (self.origin[0] + self.distance_to_steps(rel_end_point[0]),
+        self.end_scan = (self.origin[0] - self.distance_to_steps(rel_end_point[0]),
                          self.origin[1] - self.distance_to_steps(rel_end_point[1]))  # inverted y-axis
 
         # Store step size
@@ -295,7 +295,7 @@ class ZaberXYStage:
         # Calculate number of rows for the scan
         self.n_rows = int(abs(self.end_scan[1] - self.start_scan[1]) / self.step_size_steps)
 
-        self.rows = dict([(row, self.start_scan[1] + row * self.step_size_steps) for row in range(self.n_rows)])
+        self.rows = dict([(row, self.start_scan[1] - row * self.step_size_steps) for row in range(self.n_rows)])
 
         # Set the scan speed
         self.set_scan_speed_mm_s(scan_speed)
