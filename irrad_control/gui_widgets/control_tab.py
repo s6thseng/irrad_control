@@ -238,7 +238,7 @@ class IrradControl(QtWidgets.QWidget):
         layout_scan.addWidget(label_start, 4, 0, 1, 1)
         layout_scan.addWidget(spx_start_x, 4, 1, 1, 1)
         layout_scan.addWidget(spx_start_y, 4, 2, 1, 1)
-        layout_scan.addWidget(label_start, 5, 0, 1, 1)
+        layout_scan.addWidget(label_end, 5, 0, 1, 1)
         layout_scan.addWidget(spx_end_x, 5, 1, 1, 1)
         layout_scan.addWidget(spx_end_y, 5, 2, 1, 1)
         layout_scan.addWidget(btn_stop, 6, 0, 1, 3)
