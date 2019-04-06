@@ -1,5 +1,0 @@
-numpy  # C-like arrays and vectorized functions
-pyzmq  # 0MQ
-zaber.serial  # Zaber XY-Stage API
-wiringpi  # RaspberryPi library
-pyyaml  # yaml

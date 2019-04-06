@@ -25,7 +25,7 @@ if [ ! -d "$MINICONDA_PATH" ]; then
 	
 	# Install python packages
 	conda config --set always_yes yes
-	conda install pyzmq numpy pyyaml psutil pip
+	conda install pyzmq numpy pyyaml pip
 	
 	# Upgrade pip and install needed packages from pip
 	pip install --upgrade pip
