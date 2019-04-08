@@ -51,10 +51,6 @@ class ZaberXYStage:
         # y-axis is inverted
         self.home_position = (0, self.y_range_steps[-1])
 
-        # Set speeds on both axis to reasonable values: 40 mm / s
-        self.set_speed(40, self.x_axis, unit='mm/s')
-        self.set_speed(40, self.y_axis, unit='mm/s')
-
         # Attributes related to scanning
         self.scan_params = {}  # Dict to hold relevant scan parameters
         self.scan_thread = None  # Attribute for separate scanning thread
@@ -66,6 +62,10 @@ class ZaberXYStage:
         self.dist_units = OrderedDict([('mm', 1.0), ('cm', 1e1), ('m', 1e3)])
         self.speed_units = OrderedDict([('mm/s', 1.0), ('cm/s', 1e1), ('m/s', 1e3)])
         self.accel_units = OrderedDict([('mm/s2', 1.0), ('cm/s2', 1e1), ('m/s2', 1e3)])
+
+        # Set speeds on both axis to reasonable values: 40 mm / s
+        self.set_speed(40, self.x_axis, unit='mm/s')
+        self.set_speed(40, self.y_axis, unit='mm/s')
 
     def _check_reply(self, reply):
         """Method to check the reply of a command which has been issued to one of the axes"""
@@ -364,14 +364,14 @@ class ZaberXYStage:
         # Get minimum and maximum steps of travel
         min_step, max_step = int(axis.send("get limit.min").data), int(axis.send("get limit.max").data)
 
+        # Vertical axis is inverted; multiply with distance with -1
+        if axis is self.y_axis:
+            dist_steps *= -1
+
         # Check whether there's still room to move
         if not min_step <= curr_pos + dist_steps <= max_step:
             logging.error("Movement out of travel range. Abort!")
             return
-
-        # Vertical axis is inverted; multiply with distance with -1
-        if axis is self.y_axis:
-            dist_steps *= -1
 
         # Send command to axis and return reply
         _reply = axis.move_rel(dist_steps)
@@ -435,12 +435,12 @@ class ZaberXYStage:
         # Store starting scan position
         self.scan_params['start_pos'] = (self.scan_params['origin'][0] - self.distance_to_steps(rel_start_point[0]),
                                          # inverted y-axis
-                                         self.scan_params['origin'][1] - self.distance_to_steps(rel_start_point[1]))
+                                         self.scan_params['origin'][1] + self.distance_to_steps(rel_start_point[1]))
 
         # Store end position of scan
         self.scan_params['end_pos'] = (self.scan_params['origin'][0] - self.distance_to_steps(rel_end_point[0]),
                                        # inverted y-axis
-                                       self.scan_params['origin'][1] - self.distance_to_steps(rel_end_point[1]))
+                                       self.scan_params['origin'][1] + self.distance_to_steps(rel_end_point[1]))
 
         # Store input args
         self.scan_params['n_scans'] = n_scans
@@ -519,64 +519,83 @@ class ZaberXYStage:
 
         stage_pub.send_json({'meta': _meta, 'data': _data})
 
-        # Loop over all scans; each scan is counted as one coverage of the entire area
-        for scan in range(scan_params['n_scans']):
+        try:
 
-            # Determine whether we're going from top to bottom or opposite
-            _tmp_rows = list(range(scan_params['n_rows']) if scan % 2 == 0 else reversed(range(scan_params['n_rows'])))
+            # Loop over all scans; each scan is counted as one coverage of the entire area
+            for scan in range(scan_params['n_scans']):
 
-            # Loop over rows
-            for row in _tmp_rows:
+                # Determine whether we're going from top to bottom or opposite
+                _tmp_rows = list(range(scan_params['n_rows']) if scan % 2 == 0
+                                 else reversed(range(scan_params['n_rows'])))
 
-                # Check for emergency stop; if so, break
-                if self.emergency_stop.wait(1e-1):
-                    break
+                # Loop over rows
+                for row in _tmp_rows:
 
-                # Move to the current row
-                self.y_axis.move_abs(scan_params['rows'][row])
+                    # Check for emergency stop; if so, raise error
+                    if self.emergency_stop.wait(1e-1):
+                        raise UnexpectedReplyError
 
-                # Wait for beam current to be sufficient / beam to be on for scan
-                while self.no_beam.wait(1e-1):
-                    msg = "Low beam current or no beam in row {} of scan {}. " \
-                          "Waiting for beam current to rise.".format(row, scan)
-                    logging.warning(msg)
-                    time.sleep(1)
+                    # Move to the current row
+                    y_reply = self.y_axis.move_abs(scan_params['rows'][row])
 
-                # Send start data
-                _meta = {'timestamp': time.time(), 'name': scan_params['adc_name'], 'type': 'stage'}
-                _data = {'status': 'start', 'scan': scan, 'row': row, 'speed': self.get_speed(self.x_axis, unit='mm/s'),
-                         'x_start': self.x_axis.get_position() * self.microstep,
-                         'y_start': self.y_axis.get_position() * self.microstep}
+                    # Check reply; if something went wrong raise error
+                    if not self._check_reply(y_reply):
+                        raise UnexpectedReplyError
 
-                # Publish data
-                stage_pub.send_json({'meta': _meta, 'data': _data})
+                    # Wait for beam current to be sufficient / beam to be on for scan
+                    while self.no_beam.wait(1e-1):
+                        msg = "Low beam current or no beam in row {} of scan {}. " \
+                              "Waiting for beam current to rise.".format(row, scan)
+                        logging.warning(msg)
+                        time.sleep(1)
 
-                # Scan the current row
-                self.x_axis.move_abs(x_end if self.x_axis.get_position() == x_start else x_start)
+                    # Send start data
+                    _meta = {'timestamp': time.time(), 'name': scan_params['adc_name'], 'type': 'stage'}
+                    _data = {'status': 'start', 'scan': scan, 'row': row,
+                             'speed': self.get_speed(self.x_axis, unit='mm/s'),
+                             'x_start': self.x_axis.get_position() * self.microstep,
+                             'y_start': self.y_axis.get_position() * self.microstep}
 
-                # Send stop data
-                _meta = {'timestamp': time.time(), 'name': scan_params['adc_name'], 'type': 'stage'}
-                _data = {'status': 'stop',
-                         'x_stop': self.x_axis.get_position() * self.microstep,
-                         'y_stop': self.y_axis.get_position() * self.microstep}
+                    # Publish data
+                    stage_pub.send_json({'meta': _meta, 'data': _data})
 
-                # Publish data
-                stage_pub.send_json({'meta': _meta, 'data': _data})
+                    # Scan the current row
+                    x_reply = self.x_axis.move_abs(x_end if self.x_axis.get_position() == x_start else x_start)
 
-        # Send finished data
-        _meta = {'timestamp': time.time(), 'name': scan_params['adc_name'], 'type': 'stage'}
-        _data = {'status': 'finished'}
+                    # Check reply; if something went wrong raise error
+                    if not self._check_reply(x_reply):
+                        raise UnexpectedReplyError
 
-        # Publish data
-        stage_pub.send_json({'meta': _meta, 'data': _data})
+                    # Send stop data
+                    _meta = {'timestamp': time.time(), 'name': scan_params['adc_name'], 'type': 'stage'}
+                    _data = {'status': 'stop',
+                             'x_stop': self.x_axis.get_position() * self.microstep,
+                             'y_stop': self.y_axis.get_position() * self.microstep}
 
-        # Reset speeds
-        self.set_speed(40, self.x_axis, unit='mm/s')
-        self.set_speed(40, self.y_axis, unit='mm/s')
+                    # Publish data
+                    stage_pub.send_json({'meta': _meta, 'data': _data})
 
-        # Move back to origin; move y first in order to not scan over device
-        self.y_axis.move_abs(scan_params['origin'][1])
-        self.x_axis.move_abs(scan_params['origin'][0])
+        # Some axis command didn't succeed or emergency exit was issued
+        except UnexpectedReplyError:
+            logging.warning('Scan aborted!')
+            pass
 
-        # Close publish socket
-        stage_pub.close()
+        finally:
+
+            # Send finished data
+            _meta = {'timestamp': time.time(), 'name': scan_params['adc_name'], 'type': 'stage'}
+            _data = {'status': 'finished'}
+
+            # Publish data
+            stage_pub.send_json({'meta': _meta, 'data': _data})
+
+            # Reset speeds
+            self.set_speed(40, self.x_axis, unit='mm/s')
+            self.set_speed(40, self.y_axis, unit='mm/s')
+
+            # Move back to origin; move y first in order to not scan over device
+            self.y_axis.move_abs(scan_params['origin'][1])
+            self.x_axis.move_abs(scan_params['origin'][0])
+
+            # Close publish socket
+            stage_pub.close()
