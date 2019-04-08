@@ -326,8 +326,8 @@ class IrradControlWin(QtWidgets.QMainWindow):
             _data = {'meta': data['meta'], 'data': data['data']['current']}
             self.monitor_tab.plots[adc]['current_plot'].set_data(_data)
 
-            # Set current beam current attribute in server process
-            #self.send_cmd(target='server', cmd='set_current', cmd_data=_data['data']['analog'])
+            # Set current beam current attribute in server process; TODO: check whether this happens too fast
+            self.send_cmd(target='server', cmd='set_current', cmd_data=_data['data']['analog'])
 
         # Check whether data is interpreted
         elif data['meta']['type'] == 'fluence':
