@@ -42,3 +42,7 @@ with open(os.path.join(config_path, 'proportionality_constants.yaml'), 'r') as p
 # Proton hardness factors
 with open(os.path.join(config_path, 'hardness_factors.yaml'), 'r') as hf:
     hardness_factors = yaml.safe_load(hf)
+
+# DAQ devices list, eg. SEM
+with open(os.path.join(config_path, 'daq_devices.yaml'), 'r') as dd:
+    daq_devices = yaml.safe_load(dd)
