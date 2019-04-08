@@ -4,7 +4,7 @@ import time
 import subprocess
 from PyQt5 import QtWidgets, QtCore
 from irrad_control import roe_output, ro_scales, ads1256
-from irrad_control import proportionality_constants, server_ips, hardness_factors, config_path
+from irrad_control import proportionality_constants, server_ips, hardness_factors, config_path, daq_devices
 from irrad_control.gui_widgets.sub_windows import ZmqSetupWindow
 
 
@@ -25,7 +25,7 @@ class IrradSetup(QtWidgets.QWidget):
         self.setup = {}
 
         # Make defaults
-        self.default_channels = ('Left', 'Right', 'Up', 'Down', 'Sum', 'H_shift', 'V_shift')
+        self.default_channels = ('Left', 'Right', 'Up', 'Down', 'Sum')
         self.default_types = roe_output
 
         # Store widgets for daq and session input
@@ -37,8 +37,7 @@ class IrradSetup(QtWidgets.QWidget):
 
         # Attributes for paths, files and ZMQ settings
         self.output_path = os.getcwd()
-        self.session_id = '_'.join(time.asctime().split())
-        self.log_file = 'irradiation'
+        self.outfile = None
         self.zmq_setup = ZmqSetupWindow(parent=self)
 
         # Layouts
@@ -98,27 +97,15 @@ class IrradSetup(QtWidgets.QWidget):
         layout_session.addWidget(edit_folder, 1, 2, 1, 1)
         layout_session.addWidget(btn_folder, 1, 3, 1, 1)
 
-        # Label and widgets for choosing session identifier string
-        label_id = QtWidgets.QLabel('Session ID:')
-        label_id.setToolTip('Identifier appended to all files created within this session if no name specified.')
-        edit_id = QtWidgets.QLineEdit()
-        edit_id.textEdited.connect(
-            lambda text: edit_out_file.setPlaceholderText(self.log_file + '_' + (text if text else self.session_id)))
-        edit_id.setPlaceholderText(self.session_id)
-
-        # Add to layout
-        layout_session.addWidget(label_id, 2, 1, 1, 1)
-        layout_session.addWidget(edit_id, 2, 2, 1, 1)
-
         # Label and widgets for output file
         label_out_file = QtWidgets.QLabel('Output file:')
-        label_out_file.setToolTip('Base name of output file containing raw and interpreted data')
+        label_out_file.setToolTip('Name of output file containing raw and interpreted data')
         edit_out_file = QtWidgets.QLineEdit()
-        edit_out_file.setPlaceholderText(self.log_file + '_' + self.session_id)
+        edit_out_file.setPlaceholderText('irradiation_{}'.format('_'.join(time.asctime().split())))
 
         # Add to layout
-        layout_session.addWidget(label_out_file, 3, 1, 1, 1)
-        layout_session.addWidget(edit_out_file, 3, 2, 1, 1)
+        layout_session.addWidget(label_out_file, 2, 1, 1, 1)
+        layout_session.addWidget(edit_out_file, 2, 2, 1, 1)
 
         # Label and combobox to set logging level
         label_logging = QtWidgets.QLabel('Logging level:')
@@ -127,19 +114,20 @@ class IrradSetup(QtWidgets.QWidget):
         combo_logging.setCurrentIndex(1)
 
         # Add to layout
-        layout_session.addWidget(label_logging, 4, 1, 1, 1)
-        layout_session.addWidget(combo_logging, 4, 2, 1, 1)
+        layout_session.addWidget(label_logging, 3, 1, 1, 1)
+        layout_session.addWidget(combo_logging, 3, 2, 1, 1)
 
         # Label for network settings
         label_network = QtWidgets.QLabel('Network settings')
-        layout_session.addWidget(label_network, 5, 0, 1, 3)
+        layout_session.addWidget(label_network, 4, 0, 1, 3)
 
         # Server IP label and widgets
         label_server = QtWidgets.QLabel('Server IP:')
         edit_server = QtWidgets.QLineEdit()
         edit_server.setInputMask("000.000.000.000;_")
-        edit_server.textEdited.connect(lambda text: btn_add_server.setEnabled(False if text in server_ips['all'] else True))
+        edit_server.textEdited.connect(lambda text: btn_add_server.setEnabled(text not in server_ips['all']))
         combo_server = QtWidgets.QComboBox()
+        combo_server.currentTextChanged.connect(lambda text: btn_add_server.setEnabled(text not in server_ips['all']))
         combo_server.setLineEdit(edit_server)
 
         # Connect server ip edit to signals; on startup, servers are searched for automatically
@@ -157,9 +145,9 @@ class IrradSetup(QtWidgets.QWidget):
         btn_add_server.setEnabled(False)
 
         # Add to layout
-        layout_session.addWidget(label_server, 6, 1, 1, 1)
-        layout_session.addWidget(combo_server, 6, 2, 1, 1)
-        layout_session.addWidget(btn_add_server, 6, 3, 1, 1)
+        layout_session.addWidget(label_server, 5, 1, 1, 1)
+        layout_session.addWidget(combo_server, 5, 2, 1, 1)
+        layout_session.addWidget(btn_add_server, 5, 3, 1, 1)
 
         # Host PC IP label and widget
         label_host = QtWidgets.QLabel('Host IP:')
@@ -173,8 +161,8 @@ class IrradSetup(QtWidgets.QWidget):
             edit_host.setReadOnly(True)
 
         # Add to layout
-        layout_session.addWidget(label_host, 7, 1, 1, 1)
-        layout_session.addWidget(edit_host, 7, 2, 1, 1)
+        layout_session.addWidget(label_host, 6, 1, 1, 1)
+        layout_session.addWidget(edit_host, 6, 2, 1, 1)
 
         # ZMQ related label and button; shows sub window for zmq setup since it generally doesn't need to be changed
         label_zmq = QtWidgets.QLabel('%sMQ setup' % u'\u00d8')
@@ -182,12 +170,11 @@ class IrradSetup(QtWidgets.QWidget):
         btn_zmq.clicked.connect(lambda _: self.zmq_setup.show())
 
         # Add to layout
-        layout_session.addWidget(label_zmq, 8, 1, 1, 1)
-        layout_session.addWidget(btn_zmq, 8, 2, 1, 1)
+        layout_session.addWidget(label_zmq, 7, 1, 1, 1)
+        layout_session.addWidget(btn_zmq, 7, 2, 1, 1)
 
         # Store all relevant input widgets
         self.session_widgets['folder_edit'] = edit_folder
-        self.session_widgets['id_edit'] = edit_id
         self.session_widgets['outfile_edit'] = edit_out_file
         self.session_widgets['logging_combo'] = combo_logging
         self.session_widgets['server_edit'] = edit_server
@@ -219,26 +206,18 @@ class IrradSetup(QtWidgets.QWidget):
         # Label for name of DQA device which is represented by the ADC
         label_name = QtWidgets.QLabel('Device name:')
         label_name.setToolTip('Name of DAQ device e.g. SEM_C')
-        edit_name = QtWidgets.QLineEdit()
-
-        # Make a lot of connections for the name edit
-        for connection in [lambda text: self.daq_widgets['scale_combo'].setEnabled(True if text else False),
-                           lambda text: self.daq_widgets['srate_combo'].setEnabled(True if text else False),
-                           lambda text: self.daq_widgets['prop_combo'].setEnabled(True if text else False),
-                           lambda text: self.daq_widgets['kappa_combo'].setEnabled(True if text else False),
-                           lambda text: [w.setEnabled(True if text else False) for k in ('channel_edits', 'type_combos', 'ref_combos') for w in self.daq_widgets[k]],
-                           lambda _: [w.textChanged.emit(w.text()) for w in self.daq_widgets['channel_edits']]]:
-
-            edit_name.textChanged.connect(connection)
+        combo_name = QtWidgets.QComboBox()
+        combo_name.addItems(daq_devices['all'])
+        combo_name.setCurrentIndex(daq_devices['all'].index(daq_devices['default']))
 
         # Add to layout
         layout_daq.addWidget(label_name, 1, 1, 1, 1)
-        layout_daq.addWidget(edit_name, 1, 2, 1, 3)
+        layout_daq.addWidget(combo_name, 1, 2, 1, 3)
 
         # Label for readout scale combobox
         label_kappa = QtWidgets.QLabel('Proton hardness factor %s:' % u'\u03ba')
         combo_kappa = QtWidgets.QComboBox()
-        self._fill_checkbox_items(combo_kappa, hardness_factors)
+        self._fill_combobox_items(combo_kappa, hardness_factors)
 
         # Add to layout
         layout_daq.addWidget(label_kappa, 2, 1, 1, 1)
@@ -248,7 +227,7 @@ class IrradSetup(QtWidgets.QWidget):
         label_scale = QtWidgets.QLabel('RO electronics 5V full-scale:')
         combo_scale = QtWidgets.QComboBox()
         combo_scale.addItems(ro_scales.keys())
-        combo_scale.setEnabled(False)
+        combo_scale.setCurrentIndex(1)
 
         # Add to layout
         layout_daq.addWidget(label_scale, 3, 1, 1, 1)
@@ -258,7 +237,7 @@ class IrradSetup(QtWidgets.QWidget):
         label_prop = QtWidgets.QLabel('Proportionality constant %s [1/V]:' % u'\u03bb')
         label_prop.setToolTip('Constant translating SEM signal to actual proton beam current via I_Beam = %s * RO_scale * SEM_sig' % u'\u03bb')
         combo_prop = QtWidgets.QComboBox()
-        self._fill_checkbox_items(combo_prop, proportionality_constants)
+        self._fill_combobox_items(combo_prop, proportionality_constants)
 
         # Add to layout
         layout_daq.addWidget(label_prop, 4, 1, 1, 1)
@@ -269,7 +248,6 @@ class IrradSetup(QtWidgets.QWidget):
         combo_srate = QtWidgets.QComboBox()
         combo_srate.addItems([str(drate) for drate in ads1256['drate'].values()])
         combo_srate.setCurrentIndex(ads1256['drate'].values().index(100))
-        combo_srate.setEnabled(False)
 
         # Add to layout
         layout_daq.addWidget(label_srate, 5, 1, 1, 1)
@@ -316,10 +294,9 @@ class IrradSetup(QtWidgets.QWidget):
             _edit.textChanged.connect(lambda text, cbx=_cbx_ref: cbx.setEnabled(True if text else False))
             _edit.setText('' if i > len(self.default_channels) - 1 else self.default_channels[i])
 
-            # Disable widgets at first
-            _edit.setEnabled(False)
-            _cbx_type.setEnabled(False)
-            _cbx_ref.setEnabled(False)
+            # Disable widgets with no default channels at first
+            _cbx_type.setEnabled(_edit.text() != '')
+            _cbx_ref.setEnabled(_edit.text() != '')
 
             # Append to list
             edits.append(_edit)
@@ -333,7 +310,7 @@ class IrradSetup(QtWidgets.QWidget):
             layout_daq.addWidget(_cbx_ref, i + 7, 5, 1, 1)
 
         # Store all input related widgets in dict
-        self.daq_widgets['name_edit'] = edit_name
+        self.daq_widgets['name_combo'] = combo_name
         self.daq_widgets['kappa_combo'] = combo_kappa
         self.daq_widgets['prop_combo'] = combo_prop
         self.daq_widgets['scale_combo'] = combo_scale
@@ -377,16 +354,25 @@ class IrradSetup(QtWidgets.QWidget):
                         if rcbx.itemText(i) == str(last_idx + 1) or (idx is None and rcbx.itemText(i) == str(sender_idx)):
                             rcbx.model().item(i).setEnabled(True)
 
-    def _fill_checkbox_items(self, chbx, fill_dict):
+    def _fill_combobox_items(self, cbx, fill_dict):
+
+        default_idx = 0
+        _all = fill_dict['all']
 
         # Add entire Info to tooltip e.g. date of measured constant, sigma, etc.
-        for i, k in enumerate(sorted(fill_dict.keys())):
-            chbx.insertItem(i, '{} ({})'.format(k, fill_dict[k]['nominal']))
+        for i, k in enumerate(sorted(_all.keys())):
+            if 'hv_sem' in _all[k]:
+                cbx.insertItem(i, '{} ({}, HV: {})'.format(_all[k]['nominal'], k, _all[k]['hv_sem']))
+            else:
+                cbx.insertItem(i, '{} ({})'.format(_all[k]['nominal'], k))
             tool_tip = ''
-            for l in fill_dict[k]:
-                tool_tip += '{}: {}\n'.format(l, fill_dict[k][l])
-            chbx.model().item(i).setToolTip(tool_tip)
-        chbx.setEnabled(False)
+            for l in _all[k]:
+                tool_tip += '{}: {}\n'.format(l, _all[k][l])
+            cbx.model().item(i).setToolTip(tool_tip)
+
+            default_idx = default_idx if k != fill_dict['default'] else i
+
+        cbx.setCurrentIndex(default_idx)
 
     def _check_input(self):
         """Check if all necessary input is ready to continue"""
@@ -481,22 +467,22 @@ class IrradSetup(QtWidgets.QWidget):
     def _save_setup(self):
         """Save setup dict to yaml file and save in output path"""
 
-        with open(os.path.join(self.output_path, 'irradiation_setup_{}.yaml'.format(self.session_id)), 'w') as _setup:
+        f = os.path.join(self.output_path, '{}_{}.yaml'.format(self.outfile, self.daq_widgets['name_combo'].currentText()))
+        with open(f, 'w') as _setup:
             yaml.safe_dump(self.setup, _setup, default_flow_style=False)
 
     def update_setup(self):
         """Update the info into the setup dict"""
 
         # Update
-        self.session_id = self.session_widgets['id_edit'].text() or self.session_widgets['id_edit'].placeholderText()
         self.output_path = self.session_widgets['folder_edit'].text()
-        self.log_file = self.session_widgets['outfile_edit'].text() or self.session_widgets['outfile_edit'].placeholderText()
+        self.outfile = self.session_widgets['outfile_edit'].text() or self.session_widgets['outfile_edit'].placeholderText()
 
         # Session setup
         self.setup['session'] = {}
 
         self.setup['session']['loglevel'] = self.session_widgets['logging_combo'].currentText()
-        self.setup['session']['outfile'] = os.path.join(self.output_path, self.log_file)
+        self.setup['session']['outfile'] = os.path.join(self.output_path, self.outfile)
         self.setup['session']['outfolder'] = self.output_path
 
         # DAQ setup
@@ -522,11 +508,11 @@ class IrradSetup(QtWidgets.QWidget):
 
         tmp_daq['ro_scale'] = ro_scales[self.daq_widgets['scale_combo'].currentText()]
 
-        tmp_daq['prop_constant'] = proportionality_constants[self.daq_widgets['prop_combo'].currentText().split()[0]]['nominal']
+        tmp_daq['prop_constant'] = float(self.daq_widgets['prop_combo'].currentText().split()[0])
 
-        tmp_daq['hardness_factor'] = hardness_factors[self.daq_widgets['kappa_combo'].currentText().split()[0]]['nominal']
+        tmp_daq['hardness_factor'] = float(self.daq_widgets['kappa_combo'].currentText().split()[0])
 
-        self.setup['daq'][self.daq_widgets['name_edit'].text()] = tmp_daq
+        self.setup['daq'][self.daq_widgets['name_combo'].currentText()] = tmp_daq
 
     def set_read_only(self, read_only=True):
 
