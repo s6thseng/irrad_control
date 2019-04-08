@@ -3,17 +3,25 @@ import logging
 import threading
 import zmq
 from zaber.serial import *
+from collections import OrderedDict
 
 
 class ZaberXYStage:
+    """Class for interfacing the Zaber XY-stage of the irradiation setup at Bonn isochronous cyclotron"""
 
-    def __init__(self, serial_port="/dev/ttyUSB0"):
+    def __init__(self, serial_port='/dev/ttyUSB0'):
         """
         Define the attributes of this Zaber stage. For information please refer to the following links:
         https://www.zaber.com/products/xy-xyz-gantry-systems/XY/details/X-XY-LRQ300BL-E01/features
         https://www.zaber.com/products/linear-stages/X-LRQ-E/details/X-LRQ300BL-E01
+
+        Parameters
+        ----------
+        serial_port : str
+            String holding the serial port to which the stage is connected
         """
 
+        # Exact model of stage at irradiation site
         self.model = 'X-XY-LRQ300BL-E01-KX14C-SQ3'
 
         # Important parameters of each stage
@@ -28,7 +36,7 @@ class ZaberXYStage:
         self.x_device = AsciiDevice(port, 1)
         self.y_device = AsciiDevice(port, 2)
 
-        # Axis
+        # Axes
         self.x_axis = self.x_device.axis(1)
         self.y_axis = self.y_device.axis(1)
 
@@ -43,25 +51,21 @@ class ZaberXYStage:
         # y-axis is inverted
         self.home_position = (0, self.y_range_steps[-1])
 
-        # ZMQ related stuff
-        self.context = zmq.Context()
+        # Set speeds on both axis to reasonable values: 40 mm / s
+        self.set_speed(40, self.x_axis, unit='mm/s')
+        self.set_speed(40, self.y_axis, unit='mm/s')
 
-        # Emergency stop signal
-        self.emergency_stop = threading.Event()
+        # Attributes related to scanning
+        self.scan_params = {}  # Dict to hold relevant scan parameters
+        self.scan_thread = None  # Attribute for separate scanning thread
+        self.context = zmq.Context()  # ZMQ context for publishing data from self.scan_thread
+        self.emergency_stop = threading.Event()  # Event to stop scan
+        self.no_beam = threading.Event()  # Event to wait if beam current is low of beam is shut off
 
-    def update_setup(self, irrad_setup):
-
-        # Update setup
-        self.irrad_setup = irrad_setup
-
-        # Extract info and sub setups
-        self.adc_name = irrad_setup['daq'].keys()[0]
-        self.daq_setup = irrad_setup['daq'][self.adc_name]
-        self.tcp_setup = irrad_setup['tcp']
-
-    def _tcp_addr(self, port, ip='*'):
-        """Creates string of complete tcp address which sockets can bind to"""
-        return 'tcp://{}:{}'.format(ip, port)
+        # Units
+        self.dist_units = OrderedDict([('mm', 1.0), ('cm', 1e1), ('m', 1e3)])
+        self.speed_units = OrderedDict([('mm/s', 1.0), ('cm/s', 1e1), ('m/s', 1e3)])
+        self.accel_units = OrderedDict([('mm/s2', 1.0), ('cm/s2', 1e1), ('m/s2', 1e3)])
 
     def _check_reply(self, reply):
         """Method to check the reply of a command which has been issued to one of the axes"""
@@ -78,6 +82,22 @@ class ZaberXYStage:
         logging.debug("Command succeeded: {}".format(msg))
         return True
 
+    def _check_unit(self, unit, target_units):
+        """Checks whether *unit* is in *target_units*."""
+
+        # Check if unit is okay
+        if unit not in target_units.keys():
+            logging.warning("Unit of speed must be one of '{}'. Using {}!".format(', '.join(target_units.keys()),
+                                                                                  target_units.keys()[0]))
+            unit = target_units.keys()[0]
+
+        return unit
+
+    def home_stage(self):
+        """Home entire stage"""
+        _reply = (self.home_y_axis(), self.home_x_axis())
+        return _reply
+
     def home_x_axis(self):
         """Move x axis to the home position and check and return reply"""
         _reply = self.x_axis.move_abs(self.home_position[0])
@@ -91,49 +111,69 @@ class ZaberXYStage:
         return _reply
 
     def speed_to_step_s(self, speed, unit="mm/s"):
-        """Convert the speed in some unit to microsteps per second"""
+        """
+        Method to convert *speed* given in *unit* into micro steps per second
+
+        Parameters
+        ----------
+        speed : float
+            speed in *unit* to be converted to micro steps per second
+        unit : str
+            unit from which speed should be converted. Must be in self.speed_units
+        """
 
         # Check if unit is okay
-        if unit not in ("mm/s", "cm/s", "m/s"):
-            logging.warning("Unit of scan speed must be either 'mm/s', 'cm/s' or 'm/s'. Using mm/s!")
-            unit = "mm/s"
-
-        # Calculate respective unit conversion factor
-        _factor = 1 if unit == "mm/s" else 10 if unit == "cm/s" else 1000
+        unit = self._check_unit(unit, self.speed_units)
 
         # Return result as integer; for conversion formula see: https://zaber.com/documents/ZaberSpeedSetting.xls
-        return int(_factor * speed * 1.6384 * 1e-3 * 1.0 / self.microstep)
+        return int(self.speed_units[unit] * speed * 1.6384 * 1e-3 * 1.0 / self.microstep)
 
-    def speed_to_mm_s(self, speed):
-        "Convert integer speed in steps per second to mm per second"
-        return float(speed / 1.6384 * 1e3 * self.microstep)
+    def speed_to_unit(self, speed, unit='mm/s'):
+        """
+        Convert integer speed in steps per second to some unit in self.speed_units
 
-    def speed_to_cm_s(self, speed):
-        "Convert integer speed in steps per second to cm per second"
-        return self.speed_to_mm_s(speed) * 0.1
+        Parameters
+        ----------
+        speed : int
+            speed in micro steps per second
+        unit : str
+            unit in which speed should be converted. Must be in self.speed_units.
+        """
 
-    def speed_to_m_s(self, speed):
-        "Convert integer speed in steps per second to m per second"
-        return self.speed_to_mm_s(speed) * 0.001
+        # Check if unit is okay
+        unit = self._check_unit(unit, self.speed_units)
 
-    def set_scan_speed_mm_s(self, speed):
-        "Set scan speed in mm per second"
-        return self.set_speed(self.speed_to_step_s(speed, unit="mm/s"), self.x_axis)
+        # Return result as float; for conversion formula see: https://zaber.com/documents/ZaberSpeedSetting.xls
+        return float(1.0 / self.speed_units[unit] * speed / 1.6384 * 1e3 * self.microstep)
 
-    def set_speed(self, speed, axis):
-        """Set the speed at which axis moves for move rel and move abs commands"""
+    def set_speed(self, speed, axis, unit='mm/s'):
+        """
+        Set the speed at which axis moves for move rel and move abs commands
+
+        Parameters
+        ----------
+        speed : float
+            speed at which *axis* should move
+        axis : zaber.serial.AsciiAxis
+            either self.x_axis or self.y_axis
+        unit : str, None
+            unit in which speed is given. Must be in self.speed_units. If None, set speed in steps / s
+        """
 
         # Check if axis is known
         if axis not in (self.x_axis, self.y_axis):
             logging.warning("Unknown axis. Abort.")
             return
 
+        # If unit is given, get speed in steps
+        speed = speed if unit is None else self.speed_to_step_s(speed, unit)
+
         # Get maxspeed of current axis
         _axis_maxspeed = int(axis.send("get resolution").data) * 16384
 
         # Check whether speed is not larger than maxspeed
         if speed > _axis_maxspeed:
-            msg = "Maximum speed of this axis is {} mm/s. Speed not updated!".format(self.speed_to_mm_s(_axis_maxspeed))
+            msg = "Maximum speed of this axis is {} mm/s. Speed not updated!".format(self.speed_to_unit(_axis_maxspeed))
             logging.warning(msg)
             return
 
@@ -143,8 +183,17 @@ class ZaberXYStage:
 
         return _reply
 
-    def get_speed(self, axis):
-        """Get the speed at which axis moves for move rel and move abs commands"""
+    def get_speed(self, axis, unit='mm/s'):
+        """
+        Get the speed at which axis moves for move rel and move abs commands
+
+        Parameters
+        ----------
+        axis : zaber.serial.AsciiAxis
+            either self.x_axis or self.y_axis
+        unit : str, None
+            unit in which speed should be converted. Must be in self.speed_units. If None, return speed in steps / s
+        """
 
         # Check if axis is known
         if axis not in (self.x_axis, self.y_axis):
@@ -155,54 +204,75 @@ class ZaberXYStage:
         _reply = axis.send("get maxspeed")
         success = self._check_reply(_reply)
 
-        return 0 if not success else int(_reply.data)
+        # Get speed in steps per second; 0 if command didn't succeed
+        speed = 0 if not success else int(_reply.data)
 
-    def get_scan_speed(self, unit="mm/s"):
-        "Get speed in mm/cm/m per second"
-
-        if unit not in ("mm/s", "cm/s", "m/s"):
-            logging.warning("Unit of scan speed must be either 'mm/s', 'cm/s' or 'm/s'. Using mm/s!")
-            unit = "mm/s"
-
-        speed = self.get_speed(self.x_axis)
-
-        return self.speed_to_mm_s(speed) if unit == 'mm/s' else self.speed_to_cm_s(speed) if unit == 'cm/s' else self.speed_to_m_s(speed)
+        return speed if unit is None else self.speed_to_unit(speed, unit)
 
     def accel_to_step_s2(self, accel, unit="mm/s^2"):
+        """
+        Method to convert acceleration *accel* given in *unit* into micro steps per square second
 
-        if unit not in ("mm/s^2", "cm/s^2", "m/s^2"):
-            logging.warning("Unit of acceleration must be either 'mm/s^2', 'cm/s^2' or 'm/s^2'. Using mm/s^2!")
-            unit = "mm/s^2"
+        Parameters
+        ----------
+        accel : float
+            acceleration in *unit* to be converted to micro steps per square second
+        unit : str
+            unit from which acceleration should be converted. Must be in self.accel_units
+        """
 
-        _factor = 1 if unit == "mm/s^2" else 10 if unit == "cm/s^2" else 1000
+        # Check if unit is sane; if it checks out, return same unit, else returns smallest available unit
+        unit = self._check_unit(unit, self.accel_units)
 
-        return int(_factor * accel * 1.6384 * 1e-7 * 1.0 / self.microstep)
+        # Return result as integer; for conversion formula see: https://zaber.com/documents/ZaberSpeedSetting.xls
+        return int(self.accel_units[unit] * accel * 1.6384 * 1e-7 * 1.0 / self.microstep)
 
-    def accel_to_mm_s2(self, accel):
-        return float(accel / 1.6384 * 1e7 * self.microstep)
+    def accel_to_unit(self, accel, unit='mm/s2'):
+        """
+        Method to convert acceleration *accel* given in micro steps per square second into *unit*
 
-    def accel_to_cm_s2(self, accel):
-        return self.accel_to_mm_s2(accel) * 0.1
+        Parameters
+        ----------
+        accel : int
+            acceleration in micro steps per square second
+        unit : str
+            unit in which acceleration should be converted. Must be in self.accel_units
+        """
 
-    def accel_to_m_s2(self, accel):
-        return self.accel_to_mm_s2(accel) * 0.001
+        # Check if unit is sane; if it checks out, return same unit, else returns smallest available unit
+        unit = self._check_unit(unit, self.accel_units)
 
-    def set_scan_accel_mm_s2(self, accel):
-        return self.set_accel(self.accel_to_step_s2(accel, unit="mm/s^2"), self.x_axis)
+        # Return result as float; for conversion formula see: https://zaber.com/documents/ZaberSpeedSetting.xls
+        return float(1.0 / self.accel_units[unit] * accel / 1.6384 * 1e7 * self.microstep)
 
-    def set_accel(self, accel, axis):
-        """Set the acceleration at which the axis increases speed for move rel and move abs commands"""
+    def set_accel(self, accel, axis, unit='mm/s2'):
+        """
+        Set the acceleration at which the axis increases speed for move rel and move abs commands
+
+        Parameters
+        ----------
+        accel : float, int
+            acceleration; float if *unit* is given, else integer in steps
+        axis : zaber.serial.AsciiAxis
+            either self.x_axis or self.y_axis
+        unit : str, None
+            unit in which distance is given. Must be in self.dist_units. If None, get acceleration in steps / s^2
+        """
 
         # Check if axis is known
         if axis not in (self.x_axis, self.y_axis):
             logging.warning("Unknown axis. Abort.")
             return
 
+        # If unit is given, get acceleration in steps
+        accel = accel if unit is None else self.accel_to_step_s2(accel, unit)
+
         _max_accel = 32767
 
         # Check whether speed is not larger than maxspeed
         if accel > _max_accel:
-            msg = "Maximum acceleration of this axis is {} m/s. Accel not updated!".format(0)
+            msg = "Maximum acceleration of this axis is {} m/s^2." \
+                  "Acceleration not updated!".format(self.accel_to_unit(_max_accel, 'm/s2'))
             logging.warning(msg)
             return
 
@@ -212,8 +282,18 @@ class ZaberXYStage:
 
         return _reply
 
-    def get_accel(self, axis):
-        """Get the acceleration at which the axis increases speed for move rel and move abs commands"""
+    def get_accel(self, axis, unit='mm/s2'):
+        """
+        Get the acceleration at which the axis increases speed for move rel and move abs commands
+
+        Parameters
+        ----------
+        axis : zaber.serial.AsciiAxis
+            either self.x_axis or self.y_axis
+        unit : str, None
+            unit in which acceleration should be converted. Must be in self.accel_units.
+            If None, get acceleration in steps / s^2
+        """
 
         # Check if axis is known
         if axis not in (self.x_axis, self.y_axis):
@@ -224,153 +304,279 @@ class ZaberXYStage:
         _reply = axis.send("get accel")
         success = self._check_reply(_reply)
 
-        return 0 if not success else int(_reply.data)
+        # Get acceleration in steps per square second; 0 if command didn't succeed
+        accel = 0 if not success else int(_reply.data)
+
+        return accel if unit is None else self.accel_to_unit(accel, unit)
 
     def calc_accel(self, speed, distance):
+        """
+        Returns acceleration needed to get to *speed* in *distance*
+
+        Parameters
+        ----------
+        speed : float
+            speed which should be matched in *distance*
+        distance : float
+            distance to travel
+        """
+
         return speed**2.0 / (2.0 * distance)
 
     def distance_to_steps(self, distance, unit="mm"):
+        """
+        Method to convert a *distance* given in *unit* into micro steps
 
-        if unit not in ("mm", "cm", "m"):
-            logging.warning("Unit of distance must be either 'mm', 'cm' or 'm'. Using mm!")
-            unit = "mm"
+        Parameters
+        ----------
+        distance : float
+            distance of travel
+        unit : str
+            unit in which distance is given. Must be in self.dist_units
+        """
 
-        _factor = 1e-3 if unit == "mm" else 1e-2 if unit == "cm" else 1
+        # Check if unit is sane; if it checks out, return same unit, else returns smallest available unit
+        unit = self._check_unit(unit, self.dist_units)
 
-        return int(_factor * distance / self.microstep)
+        return int(self.dist_units[unit] / 1e3 * distance / self.microstep)
 
     def _move_axis_rel(self, distance, axis, unit="mm"):
-        """Method to move along the x/y axis relative to the current position"""
+        """
+        Method to move either in vertical or horizontal direction relative to the current position.
+        Does sanity check on travel destination and axis
+
+        Parameters
+        ----------
+        distance : float
+            distance of travel
+        axis : zaber.serial.AsciiAxis
+            either self.x_axis or self.y_axis
+        unit : str
+            unit in which distance is given. Must be in self.dist_units
+        """
 
         # Get distance in steps
         dist_steps = self.distance_to_steps(distance, unit)
 
-        # get current position
+        # Get current position
         curr_pos = axis.get_position()
 
+        # Get minimum and maximum steps of travel
         min_step, max_step = int(axis.send("get limit.min").data), int(axis.send("get limit.max").data)
-
-        # Vertical axis is inverted; multiply with distance with -1
-        if axis is self.y_axis:
-            dist_steps *= -1
 
         # Check whether there's still room to move
         if not min_step <= curr_pos + dist_steps <= max_step:
             logging.error("Movement out of travel range. Abort!")
             return
 
+        # Vertical axis is inverted; multiply with distance with -1
+        if axis is self.y_axis:
+            dist_steps *= -1
+
+        # Send command to axis and return reply
         _reply = axis.move_rel(dist_steps)
         self._check_reply(_reply)
 
+        return _reply
+
     def move_vertical(self, distance, unit="mm"):
-        """Method to move up the y axis relative to the current position"""
+        """
+        Method to move along the y axis relative to the current position
+
+        Parameters
+        ----------
+        distance : float
+            distance of travel
+        unit : str
+            unit in which distance is given. Must be in self.dist_units
+        """
 
         self._move_axis_rel(distance, self.y_axis, unit)
 
     def move_horizontal(self, distance, unit="mm"):
-        """Method to move up the y axis relative to the current position"""
+        """
+        Method to move along the x axis relative to the current position
+
+        Parameters
+        ----------
+        distance : float
+            distance of travel
+        unit : str
+            unit in which distance is given. Must be in self.dist_units
+        """
 
         self._move_axis_rel(distance, self.x_axis, unit)
 
-    def prepare_scan(self, rel_start_point, rel_end_point, n_scans, scan_speed, step_size):
-        """Does a complete scan from the current position of the stage"""
+    def prepare_scan(self, rel_start_point, rel_end_point, n_scans, scan_speed, step_size, tcp_address, adc_name):
+        """
+        Prepares a scan by storing all needed info in self.scan_params
 
-        # Current position in steps is relative reference for coordinate system of scan
-        self.origin = (self.x_axis.get_position(), self.y_axis.get_position())
+        Parameters
+        ----------
+        rel_start_point : tuple, list
+            iterable of starting point (x [mm], y [mm]) relative to current position, defining upper left corner of area
+        rel_end_point : tuple, list
+            iterable of end point (x [mm], y [mm]) relative to current position, defining lower right corner of area
+        n_scans : int
+            number of scans of complete area
+        scan_speed : float
+            horizontal scan speed in mm / s
+        step_size : float
+            stepp size of vertical steps in mm
+        tcp_address : str
+            tcp address to which data of stage is published during scan
+        adc_name : str
+            name of DAQ device which is represented by an ADC
+        """
 
-        # Scan start position
-        self.start_scan = (self.origin[0] - self.distance_to_steps(rel_start_point[0]),
-                           self.origin[1] - self.distance_to_steps(rel_start_point[1]))  # inverted y-axis
+        # Store position which is used as origin of relative coordinate system for scan
+        self.scan_params['origin'] = (self.x_axis.get_position(), self.y_axis.get_position())
 
-        # Scan start position
-        self.end_scan = (self.origin[0] - self.distance_to_steps(rel_end_point[0]),
-                         self.origin[1] - self.distance_to_steps(rel_end_point[1]))  # inverted y-axis
+        # Store starting scan position
+        self.scan_params['start_pos'] = (self.scan_params['origin'][0] - self.distance_to_steps(rel_start_point[0]),
+                                         # inverted y-axis
+                                         self.scan_params['origin'][1] - self.distance_to_steps(rel_start_point[1]))
 
-        # Store step size
-        self.step_size = step_size
-        self.scan_speed = scan_speed
-        self.n_scans = n_scans
-        self.step_size_steps = self.distance_to_steps(step_size, unit="mm")
+        # Store end position of scan
+        self.scan_params['end_pos'] = (self.scan_params['origin'][0] - self.distance_to_steps(rel_end_point[0]),
+                                       # inverted y-axis
+                                       self.scan_params['origin'][1] - self.distance_to_steps(rel_end_point[1]))
+
+        # Store input args
+        self.scan_params['n_scans'] = n_scans
+        self.scan_params['speed'] = scan_speed
+        self.scan_params['step_size'] = step_size
+        self.scan_params['tcp_address'] = tcp_address
+        self.scan_params['adc_name'] = adc_name
 
         # Calculate number of rows for the scan
-        self.n_rows = int(abs(self.end_scan[1] - self.start_scan[1]) / self.step_size_steps)
+        dy = self.distance_to_steps(step_size, unit='mm')
+        self.scan_params['n_rows'] = int(abs(self.scan_params['end_pos'][1] - self.scan_params['start_pos'][1]) / dy)
 
-        self.rows = dict([(row, self.start_scan[1] - row * self.step_size_steps) for row in range(self.n_rows)])
+        # Make dictionary with absolute position (in steps) of each row
+        rows = [(row, self.scan_params['start_pos'][1] - row * dy) for row in range(self.scan_params['n_rows'])]
+        self.scan_params['rows'] = dict(rows)
 
-        # Set the scan speed
-        self.set_scan_speed_mm_s(scan_speed)
+    def scan_device(self, scan_params=None):
+        """
+        Method to scan a rectangular area by stepping vertically with fixed step size and moving with
+        fixed speed horizontally. Uses info about scan parameters from scan_params dict. Does sanity checks.
+        The actual scan is done in a separate thread which calls self._scan_device.
 
-    def do_scan(self):
+        Parameters
+        ----------
+        scan_params : dict
+            dict containing all the info for doing a scan of a rectangular area.
+            If *scan_params* is None, use instance attribute self.scan_params instead.
+        """
 
-        self.scan_thread = threading.Thread(target=self._do_complete_scan)
+        # Scan parameters dict; if None, use instance attribute self.scan_params
+        scan_params = scan_params if scan_params is not None else self.scan_params
+
+        # Check if scan_params dict contains all necessary info
+        scan_reqs = ('origin', 'start_pos', 'end_pos', 'n_scans', 'n_rows',
+                     'rows', 'speed', 'step_size', 'tcp_address', 'adc_name')
+        missed_reqs = [req for req in scan_reqs if req not in scan_params]
+
+        # Return if info is missing
+        if missed_reqs:
+            msg = "Scan parameter dict is missing required info: {}. " \
+                  "Try using prepare_scan method or fill missing info in dict. Abort.".format(', '.join(missed_reqs))
+            logging.error(msg)
+            return
+
+        # Start scan in separate thread
+        self.scan_thread = threading.Thread(target=self._scan_device, args=(scan_params, ))
         self.scan_thread.start()
 
-    def _do_complete_scan(self):
+    def _scan_device(self, scan_params):
+        """
+        Method which is supposed to be called by self.scan_device. See docstring there.
+
+        Parameters
+        ----------
+        scan_params : dict
+            dict containing all the info for doing a scan of a rectangular area.
+        """
 
         # initialize zmq data publisher
         stage_pub = self.context.socket(zmq.PUB)
         stage_pub.set_hwm(10)
-        stage_pub.bind(self._tcp_addr(self.tcp_setup['port']['stage']))
+        stage_pub.bind(scan_params['tcp_address'])
 
         # Move to start point
-        self.x_axis.move_abs(self.start_scan[0])
-        self.y_axis.move_abs(self.start_scan[1])
+        self.x_axis.move_abs(scan_params['start_pos'][0])
+        self.y_axis.move_abs(scan_params['start_pos'][1])
 
-        x_start, x_end = self.start_scan[0], self.end_scan[0]
+        # Set the scan speed
+        self.set_speed(scan_params['speed'], self.x_axis, unit='mm/s')
 
-        _meta = {'timestamp': time.time(), 'name': self.adc_name, 'type': 'stage'}
-        _data = {'status': 'init', 'y_step': self.step_size, 'n_rows': self.n_rows, }
+        # Make x start and end variables
+        x_start, x_end = scan_params['start_pos'][0], scan_params['end_pos'][0]
+
+        _meta = {'timestamp': time.time(), 'name': scan_params['adc_name'], 'type': 'stage'}
+        _data = {'status': 'init', 'y_step': scan_params['step_size'], 'n_rows': scan_params['n_rows']}
 
         stage_pub.send_json({'meta': _meta, 'data': _data})
 
         # Loop over all scans; each scan is counted as one coverage of the entire area
-        for scan in range(self.n_scans):
+        for scan in range(scan_params['n_scans']):
 
             # Determine whether we're going from top to bottom or opposite
-            _tmp_rows = range(self.n_rows) if scan % 2 == 0 else reversed(range(self.n_rows))
-            _tmp_rows = list(_tmp_rows)
+            _tmp_rows = list(range(scan_params['n_rows']) if scan % 2 == 0 else reversed(range(scan_params['n_rows'])))
 
             # Loop over rows
             for row in _tmp_rows:
 
+                # Check for emergency stop; if so, break
                 if self.emergency_stop.wait(1e-1):
                     break
 
-                self.y_axis.move_abs(self.rows[row])
+                # Move to the current row
+                self.y_axis.move_abs(scan_params['rows'][row])
+
+                # Wait for beam current to be sufficient / beam to be on for scan
+                while self.no_beam.wait(1e-1):
+                    msg = "Low beam current or no beam in row {} of scan {}. " \
+                          "Waiting for beam current to rise.".format(row, scan)
+                    logging.warning(msg)
+                    time.sleep(1)
 
                 # Send start data
-                _meta = {'timestamp': time.time(), 'name': self.adc_name, 'type': 'stage'}
-                _data = {'status': 'start', 'scan': scan, 'row': row, 'speed': self.get_scan_speed(),
+                _meta = {'timestamp': time.time(), 'name': scan_params['adc_name'], 'type': 'stage'}
+                _data = {'status': 'start', 'scan': scan, 'row': row, 'speed': self.get_speed(self.x_axis, unit='mm/s'),
                          'x_start': self.x_axis.get_position() * self.microstep,
                          'y_start': self.y_axis.get_position() * self.microstep}
 
+                # Publish data
                 stage_pub.send_json({'meta': _meta, 'data': _data})
 
+                # Scan the current row
                 self.x_axis.move_abs(x_end if self.x_axis.get_position() == x_start else x_start)
 
                 # Send stop data
-                _meta = {'timestamp': time.time(), 'name': self.adc_name, 'type': 'stage'}
+                _meta = {'timestamp': time.time(), 'name': scan_params['adc_name'], 'type': 'stage'}
                 _data = {'status': 'stop',
                          'x_stop': self.x_axis.get_position() * self.microstep,
                          'y_stop': self.y_axis.get_position() * self.microstep}
 
+                # Publish data
                 stage_pub.send_json({'meta': _meta, 'data': _data})
 
         # Send finished data
-        _meta = {'timestamp': time.time(), 'name': self.adc_name, 'type': 'stage'}
+        _meta = {'timestamp': time.time(), 'name': scan_params['adc_name'], 'type': 'stage'}
         _data = {'status': 'finished'}
 
+        # Publish data
         stage_pub.send_json({'meta': _meta, 'data': _data})
 
-        # Move to the scan start position
-        self.x_axis.move_abs(self.start_scan[0])
-        self.y_axis.move_abs(self.start_scan[1])
+        # Reset speeds
+        self.set_speed(40, self.x_axis, unit='mm/s')
+        self.set_speed(40, self.y_axis, unit='mm/s')
 
+        # Move back to origin; move y first in order to not scan over device
+        self.y_axis.move_abs(scan_params['origin'][1])
+        self.x_axis.move_abs(scan_params['origin'][0])
+
+        # Close publish socket
         stage_pub.close()
-
-
-
-
-
-
-
