@@ -151,6 +151,8 @@ class IrradControl(QtWidgets.QWidget):
                                                                                       'unit': 'mm'}))
         btn_abs_v.clicked.connect(lambda _: self.send_stage_cmd('pos'))
 
+        self.btn_auto_zero = QtWidgets.QPushButton('Auto-zero offset')
+
         # Add to layout
         layout_movements.addWidget(label_abs, 6, 0, 1, 1)
         layout_movements.addWidget(label_abs_h, 7, 1, 1, 1)
@@ -159,6 +161,7 @@ class IrradControl(QtWidgets.QWidget):
         layout_movements.addWidget(label_abs_v, 8, 1, 1, 1)
         layout_movements.addWidget(spx_abs_v, 8, 2, 1, 1)
         layout_movements.addWidget(btn_abs_v, 8, 3, 1, 1)
+        layout_movements.addWidget(self.btn_auto_zero, 9, 0, 1, 4)
 
         self.stage_layout.addLayout(layout_movements)
 

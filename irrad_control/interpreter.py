@@ -14,7 +14,7 @@ from collections import defaultdict
 class IrradInterpreter(multiprocessing.Process):
     """Implements an interpreter process"""
 
-    def __init__(self, name=None):
+    def __init__(self, setup, name=None):
         super(IrradInterpreter, self).__init__()
 
         """
@@ -36,9 +36,7 @@ class IrradInterpreter(multiprocessing.Process):
         self.stop_write_data = multiprocessing.Event()
         self.is_receiving = multiprocessing.Event()
         self.xy_stage_maintenance = multiprocessing.Event()
-
-    def _init_setup(self, setup):
-        """Do the initial setup. These will be copied to the process on launch"""
+        self.auto_zero = multiprocessing.Event()
 
         # General setup
         self.irrad_setup = setup
@@ -106,13 +104,16 @@ class IrradInterpreter(multiprocessing.Process):
         self.raw_table = {}
         self.beam_table = {}
         self.fluence_table = {}
-        self.result_table =  {}
+        self.result_table = {}
+        self.offset_table = {}
 
         # Store data per interpretation cycle and ADC
         self.raw_data = {}
         self.beam_data = {}
         self.fluence_data = {}
         self.result_data = {}
+        self.auto_zero_offset = {}
+        self._auto_zero_vals = {}
 
         # Possible channels from which to get the beam positions
         self.pos_types = {'h': {'digital': ['sem_left', 'sem_right'], 'analog': ['sem_h_shift']},
@@ -179,6 +180,10 @@ class IrradInterpreter(multiprocessing.Process):
             self.fluence_data[adc] = np.zeros(shape=1, dtype=fluence_dtype)
             self.result_data[adc] = np.zeros(shape=1, dtype=result_dtype)
 
+            # Auto zeroing offset
+            self.auto_zero_offset[adc] = np.zeros(shape=1, dtype=raw_dtype)
+            self._auto_zero_vals[adc] = defaultdict(list)
+
             # Open adc table
             self.tables[adc] = tb.open_file(self.session_setup['outfile'] + '_{}.h5'.format(adc), 'w')
 
@@ -195,6 +200,9 @@ class IrradInterpreter(multiprocessing.Process):
             self.result_table[adc] = self.tables[adc].create_table(self.tables[adc].root,
                                                                    description=self.result_data[adc].dtype,
                                                                    name='Result')
+            self.offset_table[adc] = self.tables[adc].create_table(self.tables[adc].root,
+                                                                   description=self.auto_zero_offset[adc].dtype,
+                                                                   name='RawOffset')
 
     def interpret_data(self, raw_data):
         """Interpretation of the data"""
@@ -212,6 +220,22 @@ class IrradInterpreter(multiprocessing.Process):
             # Fill raw data structured array first
             for ch in data:
                 self.raw_data[adc][ch] = data[ch]
+                # Subtract offset from data; initially offset is 0 for all ch
+                data[ch] -= self.auto_zero_offset[adc][ch][0]
+
+            # Get offsets
+            if self.auto_zero.is_set():
+                # Loop over data unitl sufficient data for mean is collected
+                for ch in data:
+                    self._auto_zero_vals[adc][ch].append(self.raw_data[adc][ch][0])
+                    if len(self._auto_zero_vals[adc][ch]) == 40:
+                        self.auto_zero_offset[adc][ch] = np.mean(self._auto_zero_vals[adc][ch])
+                # If all offsets have been found, clear signal and reset list
+                if all(len(self._auto_zero_vals[adc][ch]) >= 40 for ch in data):
+                    self.auto_zero.clear()
+                    self._auto_zero_vals[adc] = defaultdict(list)
+                    self.auto_zero_offset[adc]['timestamp'] = time.time()
+                    self.offset_table[adc].append(self.auto_zero_offset[adc])
 
             ### Interpretation of data ###
 
@@ -243,7 +267,7 @@ class IrradInterpreter(multiprocessing.Process):
                     beam_data['data']['position'][sig_type][pos_type] = self.beam_data[adc][dname] = shift
 
                 # Get beam current
-                if 'current' in dname:
+                elif 'current' in dname:
 
                     # Calculate current from digitized signals of foils
                     if sig_type == 'digital':
@@ -274,7 +298,7 @@ class IrradInterpreter(multiprocessing.Process):
 
             self.data_pub.send_json(beam_data)
 
-        if meta_data['type'] == 'stage':
+        elif meta_data['type'] == 'stage':
 
             if data['status'] == 'init':
                 self.y_step = data['y_step']
@@ -282,7 +306,7 @@ class IrradInterpreter(multiprocessing.Process):
                 self._fluence[adc] = [0] * self.n_rows
                 self._fluence_err[adc] = [0] * self.n_rows
 
-            if data['status'] == 'start':
+            elif data['status'] == 'start':
                 del self._beam_currents[adc][:]
                 self._stage_scanning = True
                 self.fluence_data[adc]['timestamp_start'] = meta_data['timestamp']
@@ -290,7 +314,7 @@ class IrradInterpreter(multiprocessing.Process):
                 for prop in ('scan', 'row', 'speed', 'x_start', 'y_start'):
                     self.fluence_data[adc][prop] = data[prop]
 
-            if data['status'] == 'stop':
+            elif data['status'] == 'stop':
                 self._stage_scanning = False
                 self.fluence_data[adc]['timestamp_stop'] = meta_data['timestamp']
 
@@ -343,7 +367,7 @@ class IrradInterpreter(multiprocessing.Process):
 
                 self._update_xy_stage_stats(adc)
 
-            if data['status'] == 'finished':
+            elif data['status'] == 'finished':
 
                 # The stage is finished; append the overall fluence to the result and get the sigma by the std dev
                 self.result_data[adc]['p_fluence_mean'] = np.mean(self._fluence[adc])

@@ -46,7 +46,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
     def __init__(self, parent=None):
         super(IrradControlWin, self).__init__(parent)
 
-        # Setupd dict of the irradiation; is set when setup tab is completed
+        # Setup dict of the irradiation; is set when setup tab is completed
         self.setup = None
         
         # Needed in ordeer to stop helper threads
@@ -65,7 +65,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         self.server_targets = ('server', 'adc', 'stage')
 
         # Interpreter process
-        self.interpreter = IrradInterpreter()
+        self.interpreter = None
         
         # Connect signals
         self.data_received.connect(lambda data: self.handle_data(data))
@@ -193,7 +193,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         self._init_threads()
 
         # Init interpreter
-        self.interpreter._init_setup(setup)
+        self.interpreter = IrradInterpreter(setup)
         self.interpreter.start()
 
         # Wait for interpreter to start receive data
@@ -294,6 +294,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         # Connect control tab
         self.control_tab.sendStageCmd.connect(lambda cmd_dict: self.send_cmd(**cmd_dict))
         self.control_tab.scanPrepared.connect(lambda cmd_dict: self.monitor_tab.add_fluence_hist(**cmd_dict))
+        self.control_tab.btn_auto_zero.clicked.connect(lambda: self.interpreter.auto_zero.set())
 
         # Make temporary dict for updated tabs
         tmp_tw = {'Control': self.control_tab, 'Monitor': self.monitor_tab}
