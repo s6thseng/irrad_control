@@ -29,6 +29,8 @@ class IrradInterpreter(multiprocessing.Process):
         # Set the maximum table length before flushing data to hard drive
         self._max_buf_len = 1e6
 
+        self.stage_stats = xy_stage_stats.copy()
+
         # Attributes to interact with the actual process stuff running within run()
         self.stop_recv_data = multiprocessing.Event()
         self.stop_write_data = multiprocessing.Event()
@@ -339,7 +341,7 @@ class IrradInterpreter(multiprocessing.Process):
 
                 self.data_pub.send_json(fluence_data)
 
-                self._update_xy_stage_stats()
+                self._update_xy_stage_stats(adc)
 
             if data['status'] == 'finished':
 
@@ -363,30 +365,30 @@ class IrradInterpreter(multiprocessing.Process):
         if self._stage_scanning:
             self._beam_currents[adc].append(self.beam_data[adc]['current_analog'][0])
 
-    def _update_xy_stage_stats(self):
+    def _update_xy_stage_stats(self, adc):
 
         # Add to xy stage stats
         # This iterations travel
-        x_travel = abs(self.fluence_data[adc]['x_stop'][0] - self.fluence_data[adc]['x_start'][0])
-        y_travel = abs(self.fluence_data[adc]['y_stop'][0] - self.fluence_data[adc]['y_start'][0])
+        x_travel = float(abs(self.fluence_data[adc]['x_stop'][0] - self.fluence_data[adc]['x_start'][0]))
+        y_travel = float(self.fluence_data[adc]['step'][0] * 1e-3)
 
         # Add to total
-        xy_stage_stats['total_travel']['x'] += x_travel
-        xy_stage_stats['total_travel']['y'] += y_travel
+        self.stage_stats['total_travel']['x'] += x_travel
+        self.stage_stats['total_travel']['y'] += y_travel
 
         # Add to interval
-        xy_stage_stats['interval_travel']['x'] += x_travel
-        xy_stage_stats['interval_travel']['y'] += y_travel
+        self.stage_stats['interval_travel']['x'] += x_travel
+        self.stage_stats['interval_travel']['y'] += y_travel
 
         # Check if any axis has reached interval travel
         for axis in ('x', 'y'):
-            if xy_stage_stats['interval_travel'][axis] > xy_stage_stats['maintenance_interval']:
-                xy_stage_stats['interval_travel'][axis] = 0
+            if self.stage_stats['interval_travel'][axis] > self.stage_stats['maintenance_interval']:
+                self.stage_stats['interval_travel'][axis] = 0.0
                 self.xy_stage_maintenance.set()
                 logging.warning("{}-axis of XY-stage reached service interval travel! "
-                                "See https://www.zaber.com/wiki/Manuals/X-LRQ-E#Precautions")
+                                "See https://www.zaber.com/wiki/Manuals/X-LRQ-E#Precautions".format(axis))
 
-        xy_stage_stats['last_update'] = time.asctime()
+        self.stage_stats['last_update'] = time.asctime()
 
     def _calc_digital_shift(self, data, adc, ch_types, m='h'):
         """Calculate the beam displacement on the secondary electron monitor from the digitized foil signals"""
@@ -465,10 +467,6 @@ class IrradInterpreter(multiprocessing.Process):
         self.stop_write_data.set()
         self.stop_recv_data.set()
 
-        # Overwrite xy stage stats
-        with open(os.path.join(config_path, 'xy_stage_stats.yaml'), 'w') as xys:
-            yaml.safe_dump(xy_stage_stats, xys, default_flow_style=False)
-
     def _close_tables(self):
         """Method to close the h5-files which were opened in the setup_daq method"""
 
@@ -493,6 +491,10 @@ class IrradInterpreter(multiprocessing.Process):
 
         # Close opened data files
         self._close_tables()
+
+        # Overwrite xy stage stats
+        with open(os.path.join(config_path, 'xy_stage_stats.yaml'), 'w') as _xys:
+            yaml.safe_dump(self.stage_stats, _xys, default_flow_style=False)
 
         # User info
         logging.info('{} finished'.format(self.name.capitalize()))
