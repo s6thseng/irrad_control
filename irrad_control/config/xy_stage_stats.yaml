@@ -1,0 +1,10 @@
+interval_travel:
+  x: 0
+  y: 0
+last_update: 0
+maintenance_interval: 5e5
+meta: Maintenance interval is every 500 km. See https://www.zaber.com/wiki/Manuals/X-LRQ-E#Precautions
+total_travel:
+  x: 0.0
+  y: 0.0
+unit: m

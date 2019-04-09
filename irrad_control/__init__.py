@@ -46,3 +46,8 @@ with open(os.path.join(config_path, 'hardness_factors.yaml'), 'r') as hf:
 # DAQ devices list, eg. SEM
 with open(os.path.join(config_path, 'daq_devices.yaml'), 'r') as dd:
     daq_devices = yaml.safe_load(dd)
+
+# Keep track of xy stage travel
+with open(os.path.join(config_path, 'xy_stage_stats.yaml'), 'r') as xys:
+    xy_stage_stats = yaml.safe_load(xys)
+

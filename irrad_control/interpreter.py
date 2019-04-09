@@ -1,11 +1,13 @@
+import os
 import zmq
 import time
 import multiprocessing
 import logging
+import yaml
 import numpy as np
 import tables as tb
 from zmq.log import handlers
-from irrad_control import roe_output
+from irrad_control import roe_output, xy_stage_stats, config_path
 from collections import defaultdict
 
 
@@ -31,6 +33,7 @@ class IrradInterpreter(multiprocessing.Process):
         self.stop_recv_data = multiprocessing.Event()
         self.stop_write_data = multiprocessing.Event()
         self.is_receiving = multiprocessing.Event()
+        self.xy_stage_maintenance = multiprocessing.Event()
 
     def _init_setup(self, setup):
         """Do the initial setup. These will be copied to the process on launch"""
@@ -188,8 +191,8 @@ class IrradInterpreter(multiprocessing.Process):
                                                                     description=self.fluence_data[adc].dtype,
                                                                     name='Fluence')
             self.result_table[adc] = self.tables[adc].create_table(self.tables[adc].root,
-                                                                    description=self.result_data[adc].dtype,
-                                                                    name='Result')
+                                                                   description=self.result_data[adc].dtype,
+                                                                   name='Result')
 
     def interpret_data(self, raw_data):
         """Interpretation of the data"""
@@ -336,6 +339,8 @@ class IrradInterpreter(multiprocessing.Process):
 
                 self.data_pub.send_json(fluence_data)
 
+                self._update_xy_stage_stats()
+
             if data['status'] == 'finished':
 
                 # The stage is finished; append the overall fluence to the result and get the sigma by the std dev
@@ -357,6 +362,31 @@ class IrradInterpreter(multiprocessing.Process):
         # During scan, store all beam currents in order to get mean current over scanned row
         if self._stage_scanning:
             self._beam_currents[adc].append(self.beam_data[adc]['current_analog'][0])
+
+    def _update_xy_stage_stats(self):
+
+        # Add to xy stage stats
+        # This iterations travel
+        x_travel = abs(self.fluence_data[adc]['x_stop'][0] - self.fluence_data[adc]['x_start'][0])
+        y_travel = abs(self.fluence_data[adc]['y_stop'][0] - self.fluence_data[adc]['y_start'][0])
+
+        # Add to total
+        xy_stage_stats['total_travel']['x'] += x_travel
+        xy_stage_stats['total_travel']['y'] += y_travel
+
+        # Add to interval
+        xy_stage_stats['interval_travel']['x'] += x_travel
+        xy_stage_stats['interval_travel']['y'] += y_travel
+
+        # Check if any axis has reached interval travel
+        for axis in ('x', 'y'):
+            if xy_stage_stats['interval_travel'][axis] > xy_stage_stats['maintenance_interval']:
+                xy_stage_stats['interval_travel'][axis] = 0
+                self.xy_stage_maintenance.set()
+                logging.warning("{}-axis of XY-stage reached service interval travel! "
+                                "See https://www.zaber.com/wiki/Manuals/X-LRQ-E#Precautions")
+
+        xy_stage_stats['last_update'] = time.asctime()
 
     def _calc_digital_shift(self, data, adc, ch_types, m='h'):
         """Calculate the beam displacement on the secondary electron monitor from the digitized foil signals"""
@@ -434,6 +464,10 @@ class IrradInterpreter(multiprocessing.Process):
         # Setting signals to stop
         self.stop_write_data.set()
         self.stop_recv_data.set()
+
+        # Overwrite xy stage stats
+        with open(os.path.join(config_path, 'xy_stage_stats.yaml'), 'w') as xys:
+            yaml.safe_dump(xy_stage_stats, xys, default_flow_style=False)
 
     def _close_tables(self):
         """Method to close the h5-files which were opened in the setup_daq method"""
