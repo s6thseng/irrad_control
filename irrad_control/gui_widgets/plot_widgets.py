@@ -48,7 +48,8 @@ class PlotWrapperWidget(QtWidgets.QWidget):
         # PlotWidget to display; set size policy 
         self.pw = plot
         self.pw.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
-        
+        self.external_win = None
+
         # Main layout and sub layout for e.g. checkboxes which allow to show/hide curves in PlotWidget etc.
         self.setLayout(QtWidgets.QVBoxLayout())
         self.sub_layout = QtWidgets.QVBoxLayout()
@@ -105,14 +106,26 @@ class PlotWrapperWidget(QtWidgets.QWidget):
             _sub_layout_1.addWidget(spinbox)
 
         # Button to move self.pw to PlotWindow instance
-        self.btn = QtWidgets.QPushButton()
-        self.btn.setIcon(self.btn.style().standardIcon(QtWidgets.QStyle.SP_TitleBarMaxButton))
-        self.btn.setToolTip('Open plot in window')
-        self.btn.setFixedSize(25, 25)
-        self.btn.clicked.connect(self.move_to_win)
-        self.btn.clicked.connect(lambda: self.layout().insertStretch(1))
-        self.btn.clicked.connect(lambda: self.btn.setEnabled(False))
-        _sub_layout_1.addWidget(self.btn)
+        self.btn_open = QtWidgets.QPushButton()
+        self.btn_open.setIcon(self.btn_open.style().standardIcon(QtWidgets.QStyle.SP_TitleBarMaxButton))
+        self.btn_open.setToolTip('Open plot in window')
+        self.btn_open.setFixedSize(25, 25)
+        self.btn_open.clicked.connect(self.move_to_win)
+        self.btn_open.clicked.connect(lambda: self.layout().insertStretch(1))
+        self.btn_open.clicked.connect(lambda: self.btn_open.setEnabled(False))
+        self.btn_open.clicked.connect(lambda: self.btn_close.setEnabled(True))
+
+        # Button to close self.pw to PlotWindow instance
+        self.btn_close = QtWidgets.QPushButton()
+        self.btn_close.setIcon(self.btn_open.style().standardIcon(QtWidgets.QStyle.SP_TitleBarCloseButton))
+        self.btn_close.setToolTip('Close plot in window')
+        self.btn_close.setFixedSize(25, 25)
+        self.btn_close.setEnabled(False)
+        self.btn_close.clicked.connect(lambda: self.btn_close.setEnabled(False))
+        self.btn_close.clicked.connect(lambda: self.external_win.close())
+
+        _sub_layout_1.addWidget(self.btn_open)
+        _sub_layout_1.addWidget(self.btn_close)
 
         self.sub_layout.addLayout(_sub_layout_1)
         self.sub_layout.addLayout(_sub_layout_2)
@@ -128,11 +141,11 @@ class PlotWrapperWidget(QtWidgets.QWidget):
 
     def move_to_win(self):
         """Move PlotWidget to PlotWindow. When window is closed, transfer widget back to self"""
-        pw = PlotWindow(plot=self.pw, parent=self)
-        pw.closeWin.connect(lambda: self.layout().takeAt(1))
-        pw.closeWin.connect(lambda: self.layout().insertWidget(1, self.pw))
-        pw.closeWin.connect(lambda: self.btn.setEnabled(True))
-        pw.show()
+        self.external_win = PlotWindow(plot=self.pw, parent=self)
+        self.external_win.closeWin.connect(lambda: self.layout().takeAt(1))
+        self.external_win.closeWin.connect(lambda: self.layout().insertWidget(1, self.pw))
+        self.external_win.closeWin.connect(lambda: self.btn_open.setEnabled(True))
+        self.external_win.show()
 
 
 class IrradPlotWidget(pg.PlotWidget):
