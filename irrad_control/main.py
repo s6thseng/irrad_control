@@ -121,7 +121,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         self._init_tabs()
         self._init_log_dock()
         
-        self.sub_splitter.setSizes([int(0.45 * self.width()), int(0.55 * self.width())])
+        self.sub_splitter.setSizes([int(1. / 3. * self.width()), int(2. / 3. * self.width())])
         self.main_splitter.setSizes([int(2. / 3. * self.height()), int(1. / 3. * self.height())])
         
     def _init_menu(self):
@@ -198,7 +198,9 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         # Wait for interpreter to start receive data
         while not self.interpreter.is_receiving.is_set():
-            time.sleep(1e-2)
+            # Solves (hopefully) being stuck here because is_set() event not processed occasionally
+            QtWidgets.QApplication.processEvents()
+            time.sleep(1e-1)
 
         # Init server
         self._init_server()
