@@ -257,11 +257,16 @@ class IrradInterpreter(multiprocessing.Process):
 
                     # Calculate shift from digitized signals of foils
                     if sig_type == 'digital':
+                        # Digital shift is normalized; from -1 to 1
                         shift = self._calc_digital_shift(data, adc, self.pos_types[pos_type][sig_type], m=pos_type)
 
                     # Get shift from analog signal
                     else:
                         shift = data[self.channels[adc][self.ch_type_idx[adc][self.pos_types[pos_type][sig_type][0]]]]
+                        shift *= 1. / 5.  # Analog shift from -5 to 5 V; divide by 5 V to normalize
+
+                    # Shift to percent
+                    shift *= 100.
 
                     # Write to dict to send out and to array to store
                     beam_data['data']['position'][sig_type][pos_type] = self.beam_data[adc][dname] = shift
@@ -377,13 +382,6 @@ class IrradInterpreter(multiprocessing.Process):
 
                 # Write everything to the file
                 self.tables[adc].flush()
-
-                # Stop writing data
-                self.stop_write_data.set()
-
-                # Make sure we're leaving condition with event set so we don't add data to the table
-                while not self.stop_write_data.is_set():
-                    time.sleep(1e-3)
 
         # During scan, store all beam currents in order to get mean current over scanned row
         if self._stage_scanning:
@@ -510,15 +508,24 @@ class IrradInterpreter(multiprocessing.Process):
         # User info
         logging.info('Starting {}'.format(self.name))
 
-        # Main process runs command receive loop
-        self.recv_data()
+        try:
 
-        # Close opened data files
-        self._close_tables()
+            # Main process runs command receive loop
+            self.recv_data()
 
-        # Overwrite xy stage stats
-        with open(os.path.join(config_path, 'xy_stage_stats.yaml'), 'w') as _xys:
-            yaml.safe_dump(self.stage_stats, _xys, default_flow_style=False)
+        except Exception:
+            logging.exception("Unexpected exception occured.")
+            pass
 
-        # User info
-        logging.info('{} finished'.format(self.name.capitalize()))
+        # Make sure we're closing the data tables
+        finally:
+
+            # Close opened data files
+            self._close_tables()
+
+            # Overwrite xy stage stats
+            with open(os.path.join(config_path, 'xy_stage_stats.yaml'), 'w') as _xys:
+                yaml.safe_dump(self.stage_stats, _xys, default_flow_style=False)
+
+            # User info
+            logging.info('{} finished'.format(self.name.capitalize()))
