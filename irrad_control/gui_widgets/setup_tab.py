@@ -453,14 +453,16 @@ class IrradSetup(QtWidgets.QWidget):
 
         return host_ip
 
-    def _find_available_servers(self):
+    def _find_available_servers(self, timeout=60):
 
         available = []
-        for ip in server_ips['all']:
-            p = subprocess.Popen(["ping", "-q", "-c 1", "-W 1", ip], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            res = p.communicate(), p.returncode
-            if res[-1] == 0:
-                available.append(ip)
+        start = time.time()
+        while not available and time.time() - start < timeout:
+            for ip in server_ips['all']:
+                p = subprocess.Popen(["ping", "-q", "-c 1", "-W 1", ip], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                res = p.communicate(), p.returncode
+                if res[-1] == 0:
+                    available.append(ip)
 
         self.serverIPsFound.emit(available)
 
