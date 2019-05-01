@@ -55,7 +55,8 @@ class ZaberXYStage:
         self.scan_params = {}  # Dict to hold relevant scan parameters
         self.scan_thread = None  # Attribute for separate scanning thread
         self.context = zmq.Context()  # ZMQ context for publishing data from self.scan_thread
-        self.emergency_stop = threading.Event()  # Event to stop scan
+        self.stop_scan = threading.Event()  # Event to stop scan
+        self.finish_scan = threading.Event()  # Event to finish a scan after completing all rows of current iteration
         self.no_beam = threading.Event()  # Event to wait if beam current is low of beam is shut off
 
         # Units
@@ -407,7 +408,7 @@ class ZaberXYStage:
 
         self._move_axis_rel(distance, self.x_axis, unit)
 
-    def prepare_scan(self, rel_start_point, rel_end_point, n_scans, scan_speed, step_size, tcp_address, adc_name):
+    def prepare_scan(self, rel_start_point, rel_end_point, scan_speed, step_size, tcp_address, adc_name):
         """
         Prepares a scan by storing all needed info in self.scan_params
 
@@ -417,8 +418,6 @@ class ZaberXYStage:
             iterable of starting point (x [mm], y [mm]) relative to current position, defining upper left corner of area
         rel_end_point : tuple, list
             iterable of end point (x [mm], y [mm]) relative to current position, defining lower right corner of area
-        n_scans : int
-            number of scans of complete area
         scan_speed : float
             horizontal scan speed in mm / s
         step_size : float
@@ -443,7 +442,6 @@ class ZaberXYStage:
                                        self.scan_params['origin'][1] + self.distance_to_steps(rel_end_point[1]))
 
         # Store input args
-        self.scan_params['n_scans'] = n_scans
         self.scan_params['speed'] = scan_speed
         self.scan_params['step_size'] = step_size
         self.scan_params['tcp_address'] = tcp_address
@@ -456,6 +454,73 @@ class ZaberXYStage:
         # Make dictionary with absolute position (in steps) of each row
         rows = [(row, self.scan_params['start_pos'][1] - row * dy) for row in range(self.scan_params['n_rows'])]
         self.scan_params['rows'] = dict(rows)
+
+    def _check_scan(self, scan_params):
+        """
+        Method to do sanity checks on the *scan_params* dict.
+
+        Parameters
+        ----------
+        scan_params : dict
+            dict containing all the info for doing a scan of a rectangular area.
+            If *scan_params* is None, use instance attribute self.scan_params instead.
+        """
+
+        # Check if dict is empty or not dict
+        if not scan_params or not isinstance(scan_params, dict):
+            msg = "Scan parameter dict is empty or not of type dictionary! " \
+                  "Try using prepare_scan method or fill missing info in dict. Abort."
+            logging.error(msg)
+            return False
+
+        # Check if scan_params dict contains all necessary info
+        scan_reqs = ('origin', 'start_pos', 'end_pos', 'n_rows', 'rows',
+                     'speed', 'step_size', 'tcp_address', 'adc_name')
+        missed_reqs = [req for req in scan_reqs if req not in scan_params]
+
+        # Return if info is missing
+        if missed_reqs:
+            msg = "Scan parameter dict is missing required info: {}. " \
+                  "Try using prepare_scan method or fill missing info in dict. Abort.".format(', '.join(missed_reqs))
+            logging.error(msg)
+            return False
+
+        return True
+
+    def scan_row(self, row, speed=None, scan_params=None):
+        """
+        Method to scan a single row of a device. Uses info about scan parameters from scan_params dict.
+        Does sanity checks. The actual scan is done in a separate thread which calls self._scan_row.
+
+        Parameters
+        ----------
+        row : int:
+            Integer of row which should be scanned
+        speed : float, None
+            Scan speed in mm/s or None. If None, current speed of x-axis is used for scanning
+        scan_params : dict
+            dict containing all the info for doing a scan of a rectangular area.
+            If *scan_params* is None, use instance attribute self.scan_params instead.
+        """
+
+        # Scan parameters dict; if None, use instance attribute self.scan_params
+        scan_params = scan_params if scan_params is not None else self.scan_params
+
+        # Check input dict
+        if not self._check_scan(scan_params):
+            return
+
+        # Check row is in scan_params['rows']
+        if row not in scan_params['rows']:
+            msg = "Row {} is not in known rows starting from {} to {}. Abort".format(row,
+                                                                                     min(scan_params['rows'].keys()),
+                                                                                     max(scan_params['rows'].keys()))
+            logging.error(msg)
+            return
+
+        # Start scan in separate thread
+        self.scan_thread = threading.Thread(target=self._scan_row, args=(row, speed, scan_params))
+        self.scan_thread.start()
 
     def scan_device(self, scan_params=None):
         """
@@ -473,21 +538,100 @@ class ZaberXYStage:
         # Scan parameters dict; if None, use instance attribute self.scan_params
         scan_params = scan_params if scan_params is not None else self.scan_params
 
-        # Check if scan_params dict contains all necessary info
-        scan_reqs = ('origin', 'start_pos', 'end_pos', 'n_scans', 'n_rows',
-                     'rows', 'speed', 'step_size', 'tcp_address', 'adc_name')
-        missed_reqs = [req for req in scan_reqs if req not in scan_params]
-
-        # Return if info is missing
-        if missed_reqs:
-            msg = "Scan parameter dict is missing required info: {}. " \
-                  "Try using prepare_scan method or fill missing info in dict. Abort.".format(', '.join(missed_reqs))
-            logging.error(msg)
+        # Check input dict
+        if not self._check_scan(scan_params):
             return
 
         # Start scan in separate thread
         self.scan_thread = threading.Thread(target=self._scan_device, args=(scan_params, ))
         self.scan_thread.start()
+
+    def _scan_row(self, row, scan_params, speed=None, scan=-1, stage_pub=None):
+        """
+        Method which is called by self._scan_device or self.scan_row. See docstrings there.
+
+        Parameters
+        ----------
+        row : int
+            Row to scan
+        scan_params : dict
+            dict containing all the info for doing a scan of a rectangular area.
+        speed : float, None
+            Scan speed in mm/s or None. If None, current speed of x-axis is used for scanning
+        scan : int
+            Integer indicating the scan number during self.scan_device. *scan* for single rows is -1
+        stage_pub : zmq.PUB, None
+            Publisher socket on which to publish data. If None, open new one
+        """
+
+        # Check socket, if no socket is given, open one
+        socket_close = stage_pub is None
+        if stage_pub is None:
+            stage_pub = self.context.socket(zmq.PUB)
+            stage_pub.set_hwm(10)
+            stage_pub.bind(scan_params['tcp_address'])
+
+        # Check whether this method is called from within self.scan_device or single row is scanned.
+        # If single row is scanned, we're coming from
+        from_origin = (self.x_axis.get_position(), self.y_axis.get_position()) == scan_params['origin']
+
+        if speed is not None:
+            self.set_speed(speed, self.x_axis, unit='mm/s')
+
+        # Make x start and end variables
+        x_start, x_end = scan_params['start_pos'][0], scan_params['end_pos'][0]
+
+        # Check whether we are scanning from origin
+        if from_origin:
+            x_reply = self.x_axis.move_abs(x_start)
+
+            # Check reply; if something went wrong raise error
+            if not self._check_reply(x_reply):
+                msg = "X-axis did not move to start point. Abort"
+                raise UnexpectedReplyError(msg)
+
+        # Move to the current row
+        y_reply = self.y_axis.move_abs(scan_params['rows'][row])
+
+        # Check reply; if something went wrong raise error
+        if not self._check_reply(y_reply):
+            msg = "Y-axis did not move to row {}. Abort.".format(row)
+            raise UnexpectedReplyError(msg)
+
+        # Send start data
+        _meta = {'timestamp': time.time(), 'name': scan_params['adc_name'], 'type': 'stage'}
+        _data = {'status': 'start', 'scan': scan, 'row': row,
+                 'speed': self.get_speed(self.x_axis, unit='mm/s'),
+                 'x_start': self.x_axis.get_position() * self.microstep,
+                 'y_start': self.y_axis.get_position() * self.microstep}
+
+        # Publish data
+        stage_pub.send_json({'meta': _meta, 'data': _data})
+
+        # Scan the current row
+        x_reply = self.x_axis.move_abs(x_end if self.x_axis.get_position() == x_start else x_start)
+
+        # Check reply; if something went wrong raise error
+        if not self._check_reply(x_reply):
+            msg = "X-axis did not scan row {}. Abort.".format(row)
+            raise UnexpectedReplyError(msg)
+
+        # Send stop data
+        _meta = {'timestamp': time.time(), 'name': scan_params['adc_name'], 'type': 'stage'}
+        _data = {'status': 'stop',
+                 'x_stop': self.x_axis.get_position() * self.microstep,
+                 'y_stop': self.y_axis.get_position() * self.microstep}
+
+        # Publish data
+        stage_pub.send_json({'meta': _meta, 'data': _data})
+
+        if socket_close:
+            stage_pub.close()
+
+        if from_origin:
+            # Move back to origin; move y first in order to not scan over device
+            self.y_axis.move_abs(scan_params['origin'][1])
+            self.x_axis.move_abs(scan_params['origin'][0])
 
     def _scan_device(self, scan_params):
         """
@@ -511,18 +655,19 @@ class ZaberXYStage:
         # Set the scan speed
         self.set_speed(scan_params['speed'], self.x_axis, unit='mm/s')
 
-        # Make x start and end variables
-        x_start, x_end = scan_params['start_pos'][0], scan_params['end_pos'][0]
-
+        # Initialize scan
         _meta = {'timestamp': time.time(), 'name': scan_params['adc_name'], 'type': 'stage'}
         _data = {'status': 'init', 'y_step': scan_params['step_size'], 'n_rows': scan_params['n_rows']}
 
+        # Send init data
         stage_pub.send_json({'meta': _meta, 'data': _data})
 
         try:
 
-            # Loop over all scans; each scan is counted as one coverage of the entire area
-            for scan in range(scan_params['n_scans']):
+            # Loop until fluence is reached and self.stop_scan event is set
+            # Each scan is counted as one coverage of the entire area
+            scan = 0
+            while not (self.stop_scan.wait(1e-1) or self.finish_scan.wait(1e-1)):
 
                 # Determine whether we're going from top to bottom or opposite
                 _tmp_rows = list(range(scan_params['n_rows']) if scan % 2 == 0
@@ -532,15 +677,9 @@ class ZaberXYStage:
                 for row in _tmp_rows:
 
                     # Check for emergency stop; if so, raise error
-                    if self.emergency_stop.wait(1e-1):
-                        raise UnexpectedReplyError
-
-                    # Move to the current row
-                    y_reply = self.y_axis.move_abs(scan_params['rows'][row])
-
-                    # Check reply; if something went wrong raise error
-                    if not self._check_reply(y_reply):
-                        raise UnexpectedReplyError
+                    if self.stop_scan.wait(1e-1):
+                        msg = "Scan was stopped manually"
+                        raise UnexpectedReplyError(msg)
 
                     # Wait for beam current to be sufficient / beam to be on for scan
                     while self.no_beam.wait(1e-1):
@@ -549,35 +688,15 @@ class ZaberXYStage:
                         logging.warning(msg)
                         time.sleep(1)
 
-                    # Send start data
-                    _meta = {'timestamp': time.time(), 'name': scan_params['adc_name'], 'type': 'stage'}
-                    _data = {'status': 'start', 'scan': scan, 'row': row,
-                             'speed': self.get_speed(self.x_axis, unit='mm/s'),
-                             'x_start': self.x_axis.get_position() * self.microstep,
-                             'y_start': self.y_axis.get_position() * self.microstep}
+                    # Scan row
+                    self._scan_row(row=row, scan_params=scan_params, scan=scan, stage_pub=stage_pub)
 
-                    # Publish data
-                    stage_pub.send_json({'meta': _meta, 'data': _data})
-
-                    # Scan the current row
-                    x_reply = self.x_axis.move_abs(x_end if self.x_axis.get_position() == x_start else x_start)
-
-                    # Check reply; if something went wrong raise error
-                    if not self._check_reply(x_reply):
-                        raise UnexpectedReplyError
-
-                    # Send stop data
-                    _meta = {'timestamp': time.time(), 'name': scan_params['adc_name'], 'type': 'stage'}
-                    _data = {'status': 'stop',
-                             'x_stop': self.x_axis.get_position() * self.microstep,
-                             'y_stop': self.y_axis.get_position() * self.microstep}
-
-                    # Publish data
-                    stage_pub.send_json({'meta': _meta, 'data': _data})
+                    # Increment
+                    scan += 1
 
         # Some axis command didn't succeed or emergency exit was issued
         except UnexpectedReplyError:
-            logging.warning('Scan aborted!')
+            logging.exception("Scan aborted!")
             pass
 
         finally:
@@ -596,6 +715,13 @@ class ZaberXYStage:
             # Move back to origin; move y first in order to not scan over device
             self.y_axis.move_abs(scan_params['origin'][1])
             self.x_axis.move_abs(scan_params['origin'][0])
+
+            # Reset signal so one can scan again
+            if self.stop_scan.is_set():
+                self.stop_scan.clear()
+
+            if self.finish_scan.is_set():
+                self.finish_scan.clear()
 
             # Close publish socket
             stage_pub.close()
