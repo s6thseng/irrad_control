@@ -82,7 +82,7 @@ class ServerManager(object):
         
         self.exec_cmd('source /home/pi/miniconda/bin/activate; nohup python {}/server.py {} &'.format(self.remote_path, port))
         
-    def shutdown_server(self):
+    def kill_server(self):
         
         if self._server_pid:
         
