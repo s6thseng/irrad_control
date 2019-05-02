@@ -7,7 +7,6 @@ class IrradControl(QtWidgets.QWidget):
     """Control widget for the irradiation control software"""
 
     sendCmd = QtCore.pyqtSignal(dict)
-    scanPrepared = QtCore.pyqtSignal(dict)
 
     def __init__(self, irrad_setup, parent=None):
         super(IrradControl, self).__init__(parent)
