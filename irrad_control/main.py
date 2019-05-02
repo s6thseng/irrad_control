@@ -8,6 +8,7 @@ from collections import OrderedDict
 from email import message_from_string
 from pkg_resources import get_distribution, DistributionNotFound
 from PyQt5 import QtCore, QtWidgets, QtGui
+from threading import Event
 
 # Package imports
 from irrad_control.utils.logger import IrradLogger, LoggingStream
@@ -50,9 +51,10 @@ class IrradControlWin(QtWidgets.QMainWindow):
         self.setup = None
         
         # Needed in ordeer to stop helper threads
-        self.receive_data = True
-        self.receive_log = True
+        self.stop_recv_data = Event()
+        self.stop_recv_log = Event()
         self.daq_started = False
+        self.shutdown_confirmed = False
         
         # ZMQ context; THIS IS THREADSAFE! SOCKETS ARE NOT!
         # EACH SOCKET NEEDS TO BE CREATED WITHIN ITS RESPECTIVE THREAD/PROCESS!
@@ -197,10 +199,9 @@ class IrradControlWin(QtWidgets.QMainWindow):
         self.interpreter.start()
 
         # Wait for interpreter to start receive data
-        while not self.interpreter.is_receiving.is_set():
+        while not self.interpreter.is_receiving.wait(1e-1):
             # Solves (hopefully) being stuck here because is_set() event not processed occasionally
             QtWidgets.QApplication.processEvents()
-            time.sleep(1e-1)
 
         # Init server
         self._init_server()
@@ -294,8 +295,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         self.monitor_tab = IrradMonitor(daq_setup=self.setup['daq'], parent=self.tabs)
 
         # Connect control tab
-        self.control_tab.sendStageCmd.connect(lambda cmd_dict: self.send_cmd(**cmd_dict))
-        self.control_tab.scanPrepared.connect(lambda cmd_dict: self.monitor_tab.add_fluence_hist(**cmd_dict))
+        self.control_tab.sendCmd.connect(lambda cmd_dict: self.send_cmd(**cmd_dict))
         self.control_tab.btn_auto_zero.clicked.connect(lambda: self.interpreter.auto_zero.set())
 
         # Make temporary dict for updated tabs
@@ -328,13 +328,44 @@ class IrradControlWin(QtWidgets.QMainWindow):
             self.monitor_tab.plots[adc]['pos_plot'].set_data(data)
             _data = {'meta': data['meta'], 'data': data['data']['current']}
             self.monitor_tab.plots[adc]['current_plot'].set_data(_data)
-
-            # Set current beam current attribute in server process; TODO: check whether this happens too fast
-            self.send_cmd(target='server', cmd='set_current', cmd_data=_data['data']['analog'])
+            self.control_tab.beam_current = data['data']['current']['analog']
+            self.control_tab.check_no_beam()
 
         # Check whether data is interpreted
         elif data['meta']['type'] == 'fluence':
             self.monitor_tab.plots[adc]['fluence_plot'].set_data(data)
+
+            hist, hist_err = (data['data'][x] for x in ('hist', 'hist_err'))
+
+            lower_mean_f = sum([hist[i] - hist_err[i] for i in range(len(hist))]) / float(len(hist))
+
+            if lower_mean_f >= self.control_tab.aim_fluence:
+                self.send_cmd('stage', 'finish')
+
+            self.control_tab.update_fluence(hist[self.control_tab.scan_params['row']],  type_='row')
+
+            if self.control_tab.scan_params['row'] == self.control_tab.scan_params['n_rows'] - 1:
+                mean_fluence = sum(hist) / len(hist)
+                self.control_tab.update_fluence(mean_fluence, type_='scan')
+
+                est_n_scans = (self.control_tab.aim_fluence - mean_fluence) / (self.control_tab.beam_current * 1e-9 / (1.60217733e-19 * self.control_tab.scan_params['scan_speed'] * self.control_tab.scan_params['step_size'] * 1e-2))
+                self.control_tab.update_n_scans(int(est_n_scans))
+
+        elif data['meta']['type'] == 'stage':
+
+            if data['status'] == 'start':
+                self.control_tab.update_position([data['data']['x_start'], data['data']['y_start']])
+                self.control_tab.update_scan_parameters(scan=data['data']['scan'], row=data['data']['row'],
+                                                        scan_speed=data['data']['speed'])
+                self.control_tab.update_stage_status('Scanning...')
+
+            elif data['status'] == 'stop':
+                self.control_tab.update_position([data['data']['x_stop'], data['data']['y_stop']])
+                self.control_tab.update_stage_status('Turning')
+
+            elif data['status'] == 'finished':
+
+                self.control_tab.scan_actions(data['status'])
             
     def send_cmd(self, target, cmd, cmd_data=None):
         """Send a command *cmd* to a target *target* running within the server or interpreter process.
@@ -381,24 +412,44 @@ class IrradControlWin(QtWidgets.QMainWindow):
                     self.server.set_server_pid(reply_data)
                     self.tabs.setCurrentIndex(self.tabs.indexOf(self.monitor_tab))
 
-                if reply == 'current':
+                    # Send command to find where stage is and what the speeds are
+                    self.send_cmd('stage', 'pos')
+                    self.send_cmd('stage', 'get_speed')
 
-                    logging.debug('Beam current set to {}'.format(reply_data))
+                elif reply == 'shutdown':
 
-                if reply == 'min_current':
+                    self.shutdown_confirmed = True
 
-                    logging.debug('Minimum beam current set to {}'.format(reply_data))
+                    logging.debug("Server shut down")
 
-            if sender == 'stage':
+            elif sender == 'stage':
 
                 if reply == 'pos':
                     self.control_tab.update_position(reply_data)
 
-                if reply == 'get_speed':
+                elif reply == 'get_speed':
                     self.control_tab.update_speed(reply_data)
 
-                if reply == 'prepare':
-                    self.control_tab.update_prepare(reply_data)
+                elif reply == 'prepare':
+                    self.control_tab.update_scan_parameters(reply_data)
+                    self.monitor_tab.add_fluence_hist(**{'kappa': self.setup['daq'][self.setup['daq'].keys()[0]]['hardness_factor'],
+                                                         'n_rows': reply_data['n_rows']})
+                    self.send_cmd(target='stage', cmd='scan')
+                    self.monitor_tab.scan_actions('started')
+
+                    est_n_scans = self.control_tab.aim_fluence / (self.control_tab.beam_current * 1e-9 / (1.60217733e-19 * self.control_tab.scan_params['scan_speed'] * self.control_tab.scan_params['step_size'] * 1e-2))
+                    self.control_tab.update_n_scans(int(est_n_scans))
+
+                elif reply == 'finish':
+
+                    logging.info("Finishing scan!")
+
+                elif reply == 'no_beam':
+
+                    if reply_data:
+                        logging.debug("No beam event set")
+                    else:
+                        logging.debug("No beam event cleared")
 
         elif _type == 'ERROR':
             msg = '{} error occured: {}'.format(sender.capitalize(), reply)
@@ -426,7 +477,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         
         logging.info('Data receiver ready')
         
-        while self.receive_data:
+        while not self.stop_recv_data.is_set():
             
             data = data_sub.recv_json()
             dtype = data['meta']['type']
@@ -454,7 +505,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         
         logging.info('Log receiver ready')
         
-        while self.receive_log:
+        while self.stop_recv_log:
             log = log_sub.recv()
             if log:
                 self.log_received.emit(log.strip())
@@ -489,17 +540,18 @@ class IrradControlWin(QtWidgets.QMainWindow):
         self.interpreter.shutdown()
         self.interpreter.join()
 
-        # Kill server process on host
-        self.server.shutdown_server()
-
-        # Give 1 second to shut everything down
+        # Shutdown server process on host; timeout 3 secs
         start = time.time()
-        while time.time() - start < 1:
+        while not self.shutdown_confirmed and time.time() - start < 3:
+            self.send_cmd('server', 'shutdown')
             QtWidgets.QApplication.processEvents()
+            time.sleep(0.1)
 
-        # Stop receiver threads and delete
-        self.receive_data = False
-        self.receive_log = False
+        # Stop receiver threads
+        self.stop_recv_data.set()
+        self.stop_recv_log.set()
+
+        # Clear threadpool
         self.threadpool.clear()
         
     def file_quit(self):
