@@ -53,7 +53,7 @@ class ZaberXYStage:
 
         # Attributes related to scanning
         self.scan_params = {}  # Dict to hold relevant scan parameters
-        self.scan_thread = None  # Attribute for separate scanning thread
+        #self.scan_thread = None  # Attribute for separate scanning thread
         self.context = zmq.Context()  # ZMQ context for publishing data from self.scan_thread
         self.stop_scan = threading.Event()  # Event to stop scan
         self.finish_scan = threading.Event()  # Event to finish a scan after completing all rows of current iteration
@@ -519,8 +519,8 @@ class ZaberXYStage:
             return
 
         # Start scan in separate thread
-        self.scan_thread = threading.Thread(target=self._scan_row, args=(row, speed, scan_params))
-        self.scan_thread.start()
+        scan_thread = threading.Thread(target=self._scan_row, args=(row, speed, scan_params))
+        scan_thread.start()
 
     def scan_device(self, scan_params=None):
         """
@@ -543,8 +543,8 @@ class ZaberXYStage:
             return
 
         # Start scan in separate thread
-        self.scan_thread = threading.Thread(target=self._scan_device, args=(scan_params, ))
-        self.scan_thread.start()
+        scan_thread = threading.Thread(target=self._scan_device, args=(scan_params, ))
+        scan_thread.start()
 
     def _scan_row(self, row, scan_params, speed=None, scan=-1, stage_pub=None):
         """
@@ -688,11 +688,16 @@ class ZaberXYStage:
                         logging.warning(msg)
                         time.sleep(1)
 
+                        # If beam does not recover and we need to stop manually
+                        if self.stop_scan.wait(1e-1):
+                            msg = "Scan was stopped manually"
+                            raise UnexpectedReplyError(msg)
+
                     # Scan row
                     self._scan_row(row=row, scan_params=scan_params, scan=scan, stage_pub=stage_pub)
 
-                    # Increment
-                    scan += 1
+                # Increment
+                scan += 1
 
         # Some axis command didn't succeed or emergency exit was issued
         except UnexpectedReplyError:
@@ -722,6 +727,9 @@ class ZaberXYStage:
 
             if self.finish_scan.is_set():
                 self.finish_scan.clear()
+
+            if self.no_beam.is_set():
+                self.no_beam.clear()
 
             # Close publish socket
             stage_pub.close()
