@@ -344,28 +344,27 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
             self.control_tab.update_fluence(hist[self.control_tab.scan_params['row']],  type_='row')
 
-            if self.control_tab.scan_params['row'] == self.control_tab.scan_params['n_rows'] - 1:
+            if self.control_tab.scan_params['row'] in (0, self.control_tab.scan_params['n_rows'] - 1):
                 mean_fluence = sum(hist) / len(hist)
                 self.control_tab.update_fluence(mean_fluence, type_='scan')
-
-                est_n_scans = (self.control_tab.aim_fluence - mean_fluence) / (self.control_tab.beam_current * 1e-9 / (1.60217733e-19 * self.control_tab.scan_params['scan_speed'] * self.control_tab.scan_params['step_size'] * 1e-2))
+                est_n_scans = (self.control_tab.aim_fluence - mean_fluence) / (self.control_tab.beam_current / (1.60217733e-19 * self.control_tab.scan_params['scan_speed'] * self.control_tab.scan_params['step_size'] * 1e-2))
                 self.control_tab.update_n_scans(int(est_n_scans))
 
         elif data['meta']['type'] == 'stage':
 
-            if data['status'] == 'start':
+            if data['data']['status'] == 'start':
                 self.control_tab.update_position([data['data']['x_start'], data['data']['y_start']])
                 self.control_tab.update_scan_parameters(scan=data['data']['scan'], row=data['data']['row'],
                                                         scan_speed=data['data']['speed'])
                 self.control_tab.update_stage_status('Scanning...')
 
-            elif data['status'] == 'stop':
+            elif data['data']['status'] == 'stop':
                 self.control_tab.update_position([data['data']['x_stop'], data['data']['y_stop']])
                 self.control_tab.update_stage_status('Turning')
 
-            elif data['status'] == 'finished':
+            elif data['data']['status'] == 'finished':
 
-                self.control_tab.scan_actions(data['status'])
+                self.control_tab.scan_actions(data['data']['status'])
             
     def send_cmd(self, target, cmd, cmd_data=None):
         """Send a command *cmd* to a target *target* running within the server or interpreter process.
@@ -431,13 +430,13 @@ class IrradControlWin(QtWidgets.QMainWindow):
                     self.control_tab.update_speed(reply_data)
 
                 elif reply == 'prepare':
-                    self.control_tab.update_scan_parameters(reply_data)
+                    self.control_tab.update_scan_parameters(**reply_data)
                     self.monitor_tab.add_fluence_hist(**{'kappa': self.setup['daq'][self.setup['daq'].keys()[0]]['hardness_factor'],
                                                          'n_rows': reply_data['n_rows']})
                     self.send_cmd(target='stage', cmd='scan')
-                    self.monitor_tab.scan_actions('started')
+                    self.control_tab.scan_actions('started')
 
-                    est_n_scans = self.control_tab.aim_fluence / (self.control_tab.beam_current * 1e-9 / (1.60217733e-19 * self.control_tab.scan_params['scan_speed'] * self.control_tab.scan_params['step_size'] * 1e-2))
+                    est_n_scans = self.control_tab.aim_fluence / (self.control_tab.beam_current / (1.60217733e-19 * self.control_tab.scan_params['scan_speed'] * self.control_tab.scan_params['step_size'] * 1e-2))
                     self.control_tab.update_n_scans(int(est_n_scans))
 
                 elif reply == 'finish':
