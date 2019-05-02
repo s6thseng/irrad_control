@@ -413,6 +413,8 @@ class IrradControl(QtWidgets.QWidget):
 
         new_l = 'Scan parameters:\n'
         for i, n in enumerate(self.scan_params):
+            if n == 'rows':
+                continue
             new_l += '  ' + self.label_scan_dict[n] + ('\n' if (i+1) % 3 == 0 else '  ')
 
         self.label_scan.setText(new_l)
