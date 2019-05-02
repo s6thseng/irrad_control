@@ -18,8 +18,8 @@ class IrradServer(multiprocessing.Process):
         super(IrradServer, self).__init__()
 
         # Attributes for internal handling of sending data, receiving and commands
-        self._send_data = True
-        self._recv_cmds = True
+        self.stop_send_data = threading.Event()
+        self.stop_recv_cmds = multiprocessing.Event()
         self._busy_cmd = False
 
         # Command port to bind to
@@ -29,25 +29,16 @@ class IrradServer(multiprocessing.Process):
         self.server_rep = None
         self.context = None
 
-        # Attribute to hold beam current; needed for XY-Stage as scan criteria
-        self.beam_current = None
-
-        # Minimum beam current
-        self.min_beam_current = None
-
-        # Beam down timer
-        self.beam_down_timer = 0
-        
         # Dict of known commands
         self.commands = {'adc': [],
-                         'server': ['start', 'set_current', 'set_min_current'],
-                         'stage': ['move_rel', 'move_abs', 'prepare', 'scan', 'estop', 'pos', 'home', 'set_speed',
-                                   'get_speed']
+                         'server': ['start', 'shutdown'],
+                         'stage': ['move_rel', 'move_abs', 'prepare', 'scan', 'finish', 'stop', 'pos', 'home',
+                                   'set_speed', 'get_speed', 'no_beam']
                          }
 
         # Attribute to store setup in
         self.irrad_setup = None
-        
+
     def _tcp_addr(self, port, ip='*'):
         """Creates string of complete tcp address which sockets can bind to"""
         return 'tcp://{}:{}'.format(ip, port)
@@ -66,14 +57,14 @@ class IrradServer(multiprocessing.Process):
         # Publish log
         log_pub = self.context.socket(zmq.PUB)
         log_pub.bind(self._tcp_addr(self.tcp_setup['port']['log']))
-        
+
         # Create logging publisher first
         handler = handlers.PUBHandler(log_pub)
         logging.getLogger().addHandler(handler)
 
         # Allow connections to be made
         time.sleep(1)
-        
+
     def _setup_adc(self):
         """Setup the ADS1256 instance and channels"""
 
@@ -82,10 +73,10 @@ class IrradServer(multiprocessing.Process):
 
         # Set initial data rate from DAQ setup
         self.adc.drate = ads1256_drates[self.daq_setup['sampling_rate']]
-        
+
         # Calibrate the ADC before DAQ
         self.adc.cal_self()
-    
+
         # Declare all available channels of the ADS1256
         self._pos_channels = (POS_AIN0, POS_AIN1, POS_AIN2, POS_AIN3, POS_AIN4, POS_AIN5, POS_AIN6, POS_AIN7)
         self._gnd = NEG_AINCOM
@@ -136,14 +127,14 @@ class IrradServer(multiprocessing.Process):
         data_pub.bind(self._tcp_addr(self.tcp_setup['port']['data']))
 
         # Send data als long as specified
-        while self._send_data:
-
+        while not self.stop_send_data.is_set():
             # Read raw data from ADC
             raw_data = self.adc.read_sequence(self.adc_channels)
 
             # Add meta data
             _meta = {'timestamp': time.time(), 'name': self.adc_name, 'type': 'raw'}
-            _data = dict([(self.daq_setup['channels'][i], raw_data[i] * self.adc.v_per_digit) for i in range(len(raw_data))])
+            _data = dict(
+                [(self.daq_setup['channels'][i], raw_data[i] * self.adc.v_per_digit) for i in range(len(raw_data))])
 
             # Send
             data_pub.send_json({'meta': _meta, 'data': _data})
@@ -156,7 +147,7 @@ class IrradServer(multiprocessing.Process):
             reply_dict['data'] = data
 
         self.server_rep.send_json(reply_dict)
-        
+
     def recv_cmd(self):
         """Receiving commands at self.cmd_port.
         This is the main function which will be executed within the run-method"""
@@ -165,8 +156,8 @@ class IrradServer(multiprocessing.Process):
         self.server_rep = self.context.socket(zmq.REP)
         self.server_rep.bind(self._tcp_addr(self.cmd_port))
 
-        # Receive commands as long as self._recv_cmds is True
-        while self._recv_cmds:
+        # Receive commands as long as self.stop_recv_cmds is not set
+        while not self.stop_recv_cmds.is_set():
 
             # Check if were working on a command. We have to work sequentially
             if not self._busy_cmd:
@@ -187,13 +178,13 @@ class IrradServer(multiprocessing.Process):
 
                 # Command sanity checks
                 if target not in self.commands:
-                    msg = "Target '{}' unknown. Known targets are {}!".format(', '.join(self.commands.keys()), target)
+                    msg = "Target '{}' unknown. Known targets are {}!".format(target, ', '.join(self.commands.keys()))
                     logging.error(msg)
                     error_reply = 'No server target named {}'.format(target)
 
                 elif cmd not in self.commands[target]:
-                    msg = "Target command '{}' unknown. Known commands are {}!".format(', '.join(self.commands[target]),
-                                                                                       cmd)
+                    msg = "Target command '{}' unknown. Known commands are {}!".format(cmd,
+                                                                                       ', '.join(self.commands[target]))
                     logging.error(msg)
                     error_reply = 'No target command named {}'.format(cmd)
 
@@ -218,33 +209,10 @@ class IrradServer(multiprocessing.Process):
                 # Send reply which is PID of this process
                 self._send_reply(reply='pid', data=self.ident, sender='server', _type='STANDARD')
 
-            if cmd == 'set_current':
-                self.beam_current = cmd_data
-
-                if self.min_beam_current is not None:
-
-                    # Beam is down now
-                    if self.beam_current < self.min_beam_current:
-
-                        # Set signal if not already set
-                        if not self.xy_stage.no_beam.is_set():
-                            self.xy_stage.no_beam.set()
-
-                        # Update timer
-                        self.beam_down_timer = time.time()
-
-                    # Beam is fine
-                    else:
-                        # Wait 1 second before clear no beam signal
-                        if self.xy_stage.no_beam.is_set() and time.time() - self.beam_down_timer > 1.0:
-                            self.xy_stage.no_beam.clear()
-
-                self._send_reply(reply='current', _type='STANDARD', sender='server', data=self.beam_current)
-
-            if cmd == 'set_min_current':
-                self.min_beam_current = cmd_data
-
-                self._send_reply(reply='min_current', _type='STANDARD', sender='server', data=self.min_beam_current)
+            elif cmd == 'shutdown':
+                self._send_reply(reply='shutdown', _type='STANDARD', sender='server')
+                self.stop_send_data.set()
+                self.stop_recv_cmds.set()
 
         elif target == 'stage':
 
@@ -260,7 +228,7 @@ class IrradServer(multiprocessing.Process):
 
                 self._send_reply(reply='move_rel', _type='STANDARD', sender='stage', data=_data)
 
-            if cmd == 'move_abs':
+            elif cmd == 'move_abs':
                 axis = cmd_data['axis']
                 _data = None
                 dist_steps = self.xy_stage.distance_to_steps(cmd_data['distance'], unit=cmd_data['unit'])
@@ -273,7 +241,7 @@ class IrradServer(multiprocessing.Process):
 
                 self._send_reply(reply='move_abs', _type='STANDARD', sender='stage', data=_data)
 
-            if cmd == 'set_speed':
+            elif cmd == 'set_speed':
                 axis = cmd_data['axis']
                 if axis == 'x':
                     self.xy_stage.set_speed(cmd_data['speed'], self.xy_stage.x_axis, unit=cmd_data['unit'])
@@ -282,37 +250,49 @@ class IrradServer(multiprocessing.Process):
 
                 self._send_reply(reply='set_speed', _type='STANDARD', sender='stage')
 
-            if cmd == 'prepare':
+            elif cmd == 'prepare':
                 self.xy_stage.prepare_scan(tcp_address=self._tcp_addr(port=self.tcp_setup['port']['stage']),
                                            adc_name=self.adc_name,
                                            **cmd_data)
-                _data = {'n_rows': self.xy_stage.scan_params['n_rows'],
-                         'n_scans': self.xy_stage.scan_params['n_scans'],
-                         'scan_speed': self.xy_stage.scan_params['speed'],
-                         'step_size': self.xy_stage.scan_params['step_size']}
+                _data = {'n_rows': self.xy_stage.scan_params['n_rows'], 'rows': self.xy_stage.scan_params['rows']}
 
                 self._send_reply(reply='prepare', _type='STANDARD', sender='stage', data=_data)
 
-            if cmd == 'scan':
+            elif cmd == 'scan':
                 self.xy_stage.scan_device()
                 self._send_reply(reply='scan', _type='STANDARD', sender='stage')
 
-            if cmd == 'estop':
-                self.xy_stage.emergency_stop.set()
-                self._send_reply(reply='estop', _type='STANDARD', sender='stage')
+            elif cmd == 'stop':
+                if not self.xy_stage.stop_scan.is_set():
+                    self.xy_stage.stop_scan.set()
+                self._send_reply(reply='stop', _type='STANDARD', sender='stage')
 
-            if cmd == 'pos':
+            elif cmd == 'finish':
+                if not self.xy_stage.finish_scan.is_set():
+                    self.xy_stage.finish_scan.set()
+                self._send_reply(reply='finish', _type='STANDARD', sender='stage')
+
+            elif cmd == 'pos':
                 pos = [x.get_position() * self.xy_stage.microstep for x in (self.xy_stage.x_axis, self.xy_stage.y_axis)]
                 pos[1] = self.xy_stage.microstep * self.xy_stage.y_range_steps[-1] - pos[1]
                 self._send_reply(reply='pos', _type='STANDARD', sender='stage', data=pos)
 
-            if cmd == 'get_speed':
+            elif cmd == 'get_speed':
                 speed = [self.xy_stage.get_speed(a, unit='mm/s') for a in (self.xy_stage.x_axis, self.xy_stage.y_axis)]
                 self._send_reply(reply='get_speed', _type='STANDARD', sender='stage', data=speed)
 
-            if cmd == 'home':
+            elif cmd == 'home':
                 self.xy_stage.home_stage()
                 self._send_reply(reply='home', _type='STANDARD', sender='stage')
+
+            elif cmd == 'no_beam':
+                if cmd_data:
+                    if not self.xy_stage.no_beam.is_set():
+                        self.xy_stage.no_beam.set()
+                else:
+                    if self.xy_stage.no_beam.is_set():
+                        self.xy_stage.no_beam.clear()
+                self._send_reply(reply='no_beam', _type='STANDARD', sender='stage', data=cmd_data)
 
         # Set busy False after executed cmd
         self._busy_cmd = False
@@ -321,13 +301,16 @@ class IrradServer(multiprocessing.Process):
 
         # Create context; needs to be within run(); sockets have to be created within the respective thread
         self.context = zmq.Context()
-        
+
         # Main process runs command receive loop
         self.recv_cmd()
 
+        # Logging to user
+        logging.info("IrradServer with PID {} is shutting down...".format(self.ident))
+
 
 if __name__ == '__main__':
-    
     port = sys.argv[1]
     irrad_server = IrradServer(port)
     irrad_server.start()
+    irrad_server.join()
