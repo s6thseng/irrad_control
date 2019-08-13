@@ -72,7 +72,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         # Connect signals
         self.data_received.connect(lambda data: self.handle_data(data))
         self.reply_received.connect(lambda reply: self.handle_reply(reply))
-        self.log_received.connect(lambda log: logging.info(log))
+        self.log_received.connect(lambda log: self.handle_log(log))
 
         # Tab widgets
         self.setup_tab = None
@@ -257,7 +257,17 @@ class IrradControlWin(QtWidgets.QMainWindow):
         LoggingStream.stderr().messageWritten.connect(lambda msg: self.log_console.appendPlainText(msg))
         
         logging.info('Started "irrad_control" on %s' % platform.system())
-        
+
+    def handle_log(self, log):
+
+        num_level = 0  # NOTSET
+        for log_lvl in [lvl for lvl in logging._levelNames.keys() if isinstance(lvl, str)]:
+            if log_lvl in log.upper():
+                num_level = getattr(logging, log_lvl, None)
+                logging.debug(str(num_level))
+                break
+        logging.log(level=num_level, msg=log)
+
     def _init_server(self):
 
         # SSH connection to server pi
@@ -552,7 +562,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         # Clear threadpool
         self.threadpool.clear()
-        
+
     def file_quit(self):
 
         if self.daq_started:
