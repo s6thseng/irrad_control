@@ -34,7 +34,7 @@ class ServerManager(object):
             self.client.connect(hostname=hostname, username=username)
         except (paramiko.BadHostKeyException, paramiko.AuthenticationException, paramiko.SSHException) as e:
             
-            if type(e) in (paramiko.BadHostKeyException):
+            if type(e) in (paramiko.BadHostKeyException, ):
                 msg = "Server's host key could not be verified. Try adding key via ssh-keygen and ssh-copy-id!"
                 raise e(msg)
             else:
