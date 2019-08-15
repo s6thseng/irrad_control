@@ -8,4 +8,4 @@
 # egg-info folder
 irrad_control.egg-info/
 # xy stats
-irrad_control/config/xy_stage_stats.yaml
+irrad_control/devices/stage/xy_stage_stats.yaml
