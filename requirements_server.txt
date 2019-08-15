@@ -1,0 +1,3 @@
+pyzmq  # 0MQ
+wiringpi  # Raspberry Pi library
+zaber.serial  # Zaber Stages serial communictaion
