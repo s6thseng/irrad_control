@@ -5,7 +5,6 @@ from collections import OrderedDict
 # Paths
 package_path = os.path.dirname(__file__)
 config_path = os.path.join(package_path, 'config')
-server_path = os.path.join(package_path, 'server')
 
 # Init several dicts with hardware specifications
 
@@ -30,24 +29,41 @@ ro_scales = OrderedDict([('1 %sA' % u'\u03bc', 1000.0), ('0.33 %sA' % u'\u03bc',
 # Types of hwd channels needed for interpretation
 with open(os.path.join(config_path, 'roe_output.yaml'), 'r') as ro:
     roe_output = yaml.safe_load(ro)
+del ro
 
 # Types of hwd channels needed for interpretation
 with open(os.path.join(config_path, 'server_ips.yaml'), 'r') as si:
     server_ips = yaml.safe_load(si)
+del si
 
 # Proportionality constants between SEM signal and proton beam current
 with open(os.path.join(config_path, 'proportionality_constants.yaml'), 'r') as pc:
     proportionality_constants = yaml.safe_load(pc)
+del pc
 
 # Proton hardness factors
 with open(os.path.join(config_path, 'hardness_factors.yaml'), 'r') as hf:
     hardness_factors = yaml.safe_load(hf)
+del hf
 
 # DAQ devices list, eg. SEM
 with open(os.path.join(config_path, 'daq_devices.yaml'), 'r') as dd:
     daq_devices = yaml.safe_load(dd)
+del dd
 
 # Keep track of xy stage travel
-with open(os.path.join(config_path, 'xy_stage_stats.yaml'), 'r') as xys:
+if not os.path.isfile(os.path.join(package_path, 'devices/stage/xy_stage_stats.yaml')):
+    # Open xy stats template and safe a copy
+    with open(os.path.join(config_path, 'xy_stage_stats.yaml'), 'r') as xys_l:
+        xy_stage_stats_tmp = yaml.safe_load(xys_l)
+
+    with open(os.path.join(package_path, 'devices/stage/xy_stage_stats.yaml'), 'w') as xys_s:
+        yaml.safe_dump(xy_stage_stats_tmp, xys_s)
+
+    del xy_stage_stats_tmp, xys_l, xys_s
+
+with open(os.path.join(package_path, 'devices/stage/xy_stage_stats.yaml'), 'r') as xys:
     xy_stage_stats = yaml.safe_load(xys)
+del xys
+
 
