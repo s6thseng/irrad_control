@@ -5,7 +5,6 @@ from setuptools import setup, find_packages  # This setup relies on setuptools s
 # Figure out if we're installing on control PC or on server
 try:
     _server = True if sys.argv[1] == 'server' else False
-    del sys.argv[1]
 except IndexError:
     _server = False
 
@@ -32,13 +31,14 @@ setup_kwargs = {'name': 'irrad_control',
                 'install_requires': required,
                 'include_package_data': True,  # accept all data files and directories matched by MANIFEST.in or found in source control
                 'package_data': {'': ['README.*', 'VERSION'], 'docs': ['*'], 'examples': ['*']},
-                'keywords':['radiation damage', 'NIEL', 'silicon', 'irradiation', 'proton', 'fluence'],
+                'keywords': ['radiation damage', 'NIEL', 'silicon', 'irradiation', 'proton', 'fluence'],
                 'platforms': 'any',
                 'entry_points': {'console_scripts': ['irrad_control = irrad_control.main:main']}
                 }
 
-# Remove entry_points for server setup
+# Remove "server" from sys.argv and entry_points from server setup dict
 if _server:
+    del sys.argv[1]
     del setup_kwargs['entry_points']
 
 # Setup
