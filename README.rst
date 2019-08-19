@@ -8,12 +8,8 @@ Introduction
 ``irrad_control`` is a GUI-based control, data acquisition (DAQ) and visualization software for the proton irradiation site at the `Bonn isochronous cyclotron <https://www.zyklotron.hiskp.uni-bonn.de/zyklo_e/index.html>`_, located at the Helmholtz Institut für Strahlen- und Kernphysik (`HISKP <https://www.hiskp.uni-bonn.de/>`_), of Bonn University. It consists of software which runs on an on-site *Raspberry Pi* server controlling the setup and on the DAQ PC interpreting and visualizing data as well as controlling the server.
 
 .. image:: static/hiskp_logo.png
-    :width: 24%
-.. image:: static/irrad_setup_site.jpg
-    :width: 50%
-    :alt: Proton irradiation site at Bonn isochronous cyclotron
 .. image:: static/silab_logo.png
-    :width: 24%
+.. image:: static/irrad_setup_site.jpg
 
 Installation
 ============
