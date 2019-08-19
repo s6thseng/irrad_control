@@ -5,7 +5,15 @@ Irrad_Control
 Introduction
 ============
 
-``irrad_control`` is a GUI-based control and data visualization software for the irradiation facility at the HISKP cyclotron of Bonn University.
+``irrad_control`` is a GUI-based control, data acquisition (DAQ) and visualization software for the proton irradiation site at the `Bonn isochronous cyclotron <https://www.zyklotron.hiskp.uni-bonn.de/zyklo_e/index.html>`_, located at the Helmholtz Institut für Strahlen- und Kernphysik (`HISKP <https://www.hiskp.uni-bonn.de/>`_), of Bonn University. It consists of software which runs on an on-site *Raspberry Pi* server controlling the setup and on the DAQ PC interpreting and visualizing data as well as controlling the server.
+
+.. image:: static/hiskp_logo.png
+    :width: 24%
+.. image:: static/irrad_setup_site.jpg
+    :width: 50%
+    :alt: Proton irradiation site at Bonn isochronous cyclotron
+.. image:: static/silab_logo.png
+    :width: 24%
 
 Installation
 ============
@@ -13,7 +21,6 @@ Installation
 You have to have Python 2/3 with the following packages installed:
 
 - numpy
-- scipy
 - pyyaml
 - pyzmq
 - pytables
@@ -21,23 +28,19 @@ You have to have Python 2/3 with the following packages installed:
 - `pyqtgraph <http://pyqtgraph.org/>`_
 - paramiko
 
-It's recommended to use a Python environment like `Miniconda <https://conda.io/miniconda.html>`_. After installation you can use Minicondas package manager ``conda`` and ``pip`` to install the required packages
+It's recommended to use a Python environment like `Miniconda <https://conda.io/miniconda.html>`_. After installation you can use Minicondas package manager ``conda`` to install the required packages
 
 .. code-block:: bash
 
-   conda install numpy scipy pyyaml pytables pyqt pyzmq paramiko
+   conda install numpy pyyaml pytables pyqt pyzmq pyqtgraph paramiko
 
-.. code-block:: bash
-
-   pip install git+https://github.com/pyqtgraph/pyqtgraph.git@pyqtgraph-0.10.0
-
-To finally install ``irrad_control`` run the setup file
+To finally install ``irrad_control`` on the DAQ PC run the setup script
 
 .. code-block:: bash
 
    python setup.py develop
 
-Setup control & DAQ
+Setup Control & DAQ
 ===================
 
 The irradiation setup is controlled by a RaspberryPi 3 server which handles a XY-Stage as well as an extension
@@ -49,4 +52,7 @@ A ``ssh key`` of the host PC must be copied to the server Raspberry Pi. Create a
    ssh-keygen -b 2048 -t rsa
    ssh-copy-id pi@ip
 
-where ``ip`` is the local ip of within the network. The server is then automatically set up on first use with ``irrad_control``.
+where ``ip`` is the ip of the Raspberry Pi within the network. The server is then automatically set up on first use with ``irrad_control``.
+
+Data Visualization
+==================
