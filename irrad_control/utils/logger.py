@@ -39,13 +39,13 @@ class LoggingStream(QtCore.QObject):
         return LoggingStream._stderr
 
 
-class IrradLogger(logging.Handler):
+class CustomHandler(logging.Handler):
     """
     Implements a logging handler which allows redirecting log thread-safe
     """
 
     def __init__(self, parent):
-        super(IrradLogger, self).__init__()
+        super(CustomHandler, self).__init__()
 
     def emit(self, record):
         msg = self.format(record)
