@@ -20,6 +20,9 @@ if _YAML:
     package_path = os.path.dirname(__file__)
     config_path = os.path.join(package_path, 'config')
 
+    # Shell script to config server
+    config_server_script = os.path.join(package_path, 'configure_server.sh')
+
     # Init several dicts with hardware specifications
 
     # ADS1256 data rates and number of averages ber data rate
