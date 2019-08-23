@@ -11,14 +11,9 @@ from PyQt5 import QtCore, QtWidgets, QtGui
 from threading import Event
 
 # Package imports
-from irrad_control.utils.logger import IrradLogger, LoggingStream
-from irrad_control.utils.worker import Worker
-from irrad_control.utils.server_manager import ServerManager
-from irrad_control.gui_widgets.daq_info_widget import DaqInfoWidget
-from irrad_control.gui_widgets.monitor_tab import IrradMonitor
-from irrad_control.gui_widgets.control_tab import IrradControl
-from irrad_control.gui_widgets.setup_tab import IrradSetup
-from irrad_control.interpreter import IrradInterpreter
+from irrad_control.utils import CustomHandler, LoggingStream, Worker, ProcessManager
+from irrad_control.gui.widgets import DaqInfoWidget
+from irrad_control.gui.tabs import IrradSetupTab, IrradControlTab, IrradMonitorTab
 
 
 PROJECT_NAME = 'Irrad Control'
@@ -64,10 +59,11 @@ class IrradControlWin(QtWidgets.QMainWindow):
         self.threadpool = QtCore.QThreadPool()
 
         # Server process and hardware that can receive commands using self.send_cmd method
-        self.server_targets = ('server', 'adc', 'stage')
+        self._targets = ('server', 'adc', 'stage', 'temp', 'interpreter')
 
         # Interpreter process
         self.interpreter = None
+        self.proc_mngr = None
         
         # Connect signals
         self.data_received.connect(lambda data: self.handle_data(data))
@@ -158,7 +154,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         for name in self.tab_order:
 
             if name == 'Setup':
-                self.setup_tab = IrradSetup(parent=self)
+                self.setup_tab = IrradSetupTab(parent=self)
                 self.setup_tab.setupCompleted.connect(lambda setup: self._init_setup(setup))
                 self.setup_tab.serverIPsFound.connect(lambda ip_list:
                                                       self.handle_messages(
@@ -194,17 +190,8 @@ class IrradControlWin(QtWidgets.QMainWindow):
         # Start receiving data and log
         self._init_threads()
 
-        # Init interpreter
-        self.interpreter = IrradInterpreter(setup)
-        self.interpreter.start()
-
-        # Wait for interpreter to start receive data
-        while not self.interpreter.is_receiving.wait(1e-1):
-            # Solves (hopefully) being stuck here because is_set() event not processed occasionally
-            QtWidgets.QApplication.processEvents()
-
-        # Init server
-        self._init_server()
+        # Init subprocesses
+        self._init_subprocesses()
 
     def _init_log_dock(self):
         """Initializes corresponding log dock"""
@@ -246,7 +233,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         logging.getLogger().setLevel(loglevel)
 
         # Create logger instance
-        self.logger = IrradLogger(self.main_widget)
+        self.logger = CustomHandler(self.main_widget)
         self.logger.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 
         # Add custom logger
@@ -268,29 +255,40 @@ class IrradControlWin(QtWidgets.QMainWindow):
                 break
         logging.log(level=num_level, msg=log)
 
-    def _init_server(self):
+    def _init_subprocesses(self):
 
-        # SSH connection to server pi
-        self.server = ServerManager(hostname=self.setup['tcp']['ip']['server'])
+        # Class to manage the server, interpreter and additional subprocesses
+        self.proc_mngr = ProcessManager()
 
-        # Worker that sets up the Raspberry Pi server by running installation script (install miniconda etc.)
-        server_prep_worker = Worker(func=self.server.prepare_server)
+        # Loop over all server(s), connect to the server(s) and launch worker for configuration
+        server_config_workers = {}
+        for hostname in self.setup['tcp']['ip']['server']:
+            # Connect
+            self.proc_mngr.connect_to_server(hostname=hostname, username='pi')
 
-        # Connect server preparation workers finished signal to launch server process
-        for connection in [lambda: self.server.start_server_process(self.setup['tcp']['port']['cmd']),
-                           lambda: self.send_cmd(target='server', cmd='start', cmd_data=self.setup)]:
-            server_prep_worker.signals.finished.connect(connection)
+            # Prepare server in QThread on init
+            server_config_workers[hostname] = Worker(func=self.proc_mngr.configure_server, args=(hostname, ))
 
-        self.threadpool.start(server_prep_worker)
+            # Connect workers finish signal to starting process on server
+            for con in [lambda h=hostname: self.proc_mngr.start_server_process(h, self.setup['tcp']['port']['cmd']),
+                        lambda h=hostname: self.send_cmd(hostname=h, target='server', cmd='start', cmd_data=self.setup)
+                        ]:
+                server_config_workers[hostname].signals.finished.connect(con)
+
+            # Launch worker on QThread
+            self.threadpool.start(server_config_worker[hostname])
+
+        # Launch interpreter process
+        self.proc_mngr.start_interpreter_process(self.setup['tcp']['port']['cmd'])
             
     def _init_threads(self):       
                 
         # Fancy QThreadPool and QRunnable approach
-        self.workers = {'recv_data': Worker(func=self.recv_data),
+        recv_workers = {'recv_data': Worker(func=self.recv_data),
                         'recv_log': Worker(func=self.recv_log)}
         
-        for worker in self.workers:
-            self.threadpool.start(self.workers[worker])
+        for _worker in recv_workers:
+            self.threadpool.start(recv_workers[_worker])
         
     def _tcp_addr(self, port, ip='*'):
         """Creates string of complete tcp address which sockets can bind to"""
@@ -376,26 +374,26 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
                 self.control_tab.scan_actions(data['data']['status'])
             
-    def send_cmd(self, target, cmd, cmd_data=None):
+    def send_cmd(self, hostname, target, cmd, cmd_data=None):
         """Send a command *cmd* to a target *target* running within the server or interpreter process.
-        The command can have respective data *cmd_data*. Targets must be listed in self.server_targets."""
+        The command can have respective data *cmd_data*. Targets must be listed in self._targets."""
 
-        if target not in self.server_targets:
-            msg = '{} not in known by command targets. Known targets: {}'.format(target, ', '.join(self.server_targets))
+        if target not in self._targets:
+            msg = '{} not in known by command targets. Known targets: {}'.format(target, ', '.join(self._targets))
             logging.error(msg)
             return
 
         cmd_dict = {'target': target, 'cmd': cmd, 'data': cmd_data}
-        cmd_worker = Worker(self._send_cmd_get_reply, cmd_dict)
+        cmd_worker = Worker(self._send_cmd_get_reply, hostname, cmd_dict)
         self.threadpool.start(cmd_worker)
 
-    def _send_cmd_get_reply(self, cmd_dict):
+    def _send_cmd_get_reply(self, hostname, cmd_dict):
         """Sending a command to the server and waiting for its reply. This runs on a separate QThread due
         to the blocking nature of the recv() method of sockets. *cmd_dict* contains the target, cmd and cmd_data."""
 
         # Spawn socket to send request to server and connect
         server_req = self.context.socket(zmq.REQ)
-        server_req.connect(self._tcp_addr(self.setup['tcp']['port']['cmd'], self.setup['tcp']['ip']['server']))
+        server_req.connect(self._tcp_addr(self.setup['tcp']['port']['cmd'], hostname))
 
         # Send command dict and wait for reply
         server_req.send_json(cmd_dict)
@@ -474,7 +472,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         data_sub = self.context.socket(zmq.SUB)
 
         # Connect to data from remote server and local interpreter process
-        for ip in (self.setup['tcp']['ip']['server'], 'localhost'):
+        for ip in self.setup['tcp']['ip']['server'] + ['localhost']:
             data_sub.connect(self._tcp_addr(self.setup['tcp']['port']['data'], ip=ip))
 
         # Connect to stage data
@@ -514,7 +512,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         
         logging.info('Log receiver ready')
         
-        while self.stop_recv_log:
+        while not self.stop_recv_log.is_set():
             log = log_sub.recv()
             if log:
                 self.log_received.emit(log.strip())

@@ -16,52 +16,57 @@ class ProcessManager(object):
     def __init__(self):
         super(ProcessManager, self).__init__()
 
-        # Server connection related
-        self.server_ip = None
-        self.server_uname = None
-        self.client = None
+        # Server connection related; multiple servers can exist
+        self.server = {}
+        self.client = {}
+        self.server_pid = {}
 
-        # Server process ID
-        self.server_pid = None
-
-        # Interpreter process
+        # Interpreter process; only one
         self.interpreter_proc = None
         self.interpreter_pid = None
 
     def connect_to_server(self, hostname, username):
 
         # Update if we have no server credentials
-        self.server_ip = hostname if self.server_ip is None else self.server_ip
-        self.server_uname = username if self.server_uname is None else self.server_uname
+        if hostname not in self.server:
 
-        # Setup SSH client and connect to server
-        self.client = paramiko.SSHClient()
-        self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            # Update server dict
+            self.server[hostname] = username
 
-        logging.info('Connecting to server {}@{}...'.format(username, hostname))
+        if hostname not in self.client:
 
-        # Try to connect
-        try:
-            self.client.connect(hostname=hostname, username=username)
-        # Something went wrong
-        except (paramiko.BadHostKeyException, paramiko.AuthenticationException, paramiko.SSHException) as e:
-            # We need to add key, let user know
-            if type(e) is paramiko.BadHostKeyException:
-                msg = "Server's host key could not be verified. Try creating key on host PC via" \
-                      " ssh-keygen and copy to server via ssh-copy-id!"
-                raise e(msg)
-            else:
-                raise e
+            # Setup SSH client and connect to server
+            self.client[hostname] = paramiko.SSHClient()
+            self.client[hostname].set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-        # Success
-        logging.info('Successfully connected to server {}@{}!'.format(username, hostname))
+            logging.info('Connecting to server {}@{}...'.format(username, hostname))
+
+            # Try to connect
+            try:
+                self.client[hostname].connect(hostname=hostname, username=username)
+            # Something went wrong
+            except (paramiko.BadHostKeyException, paramiko.AuthenticationException, paramiko.SSHException) as e:
+                # We need to add key, let user know
+                if type(e) is paramiko.BadHostKeyException:
+                    msg = "Server's host key could not be verified. Try creating key on host PC via" \
+                          " ssh-keygen and copy to server via ssh-copy-id!"
+                    raise e(msg)
+                else:
+                    raise e
+
+            # Success
+            logging.info('Successfully connected to server {}@{}!'.format(username, hostname))
+
+        else:
+
+            logging.info('Already connected to server {}@{}!'.format(username, hostname))
         
-    def configure_server(self, py_version=None, py_update=False, git_pull=False, branch=False):
+    def configure_server(self, hostname, py_version=None, py_update=False, git_pull=False, branch=False):
 
-        remote_script = '/home/{}/config_server.sh'.format(self.server_uname)
+        remote_script = '/home/{}/config_server.sh'.format(self.server[hostname])
 
         # Move configure script to server
-        self.copy_to_server(config_server_script, remote_script)
+        self.copy_to_server(hostname, config_server_script, remote_script)
 
         # Add args
         _rs = remote_script
@@ -71,16 +76,16 @@ class ProcessManager(object):
         _rs += '' if not branch else ' -b={}'.format(branch)
 
         # Run script to determine whether server RPi has miniconda and all packages installed
-        self._exec_cmd('bash {}'.format(_rs), log_stdout=True)
+        self._exec_cmd(hostname, 'bash {}'.format(_rs), log_stdout=True)
 
         # Remove script
-        self._exec_cmd('rm {}'.format(remote_script))
+        self._exec_cmd(hostname, 'rm {}'.format(remote_script))
         
-    def start_server_process(self, port):
+    def start_server_process(self, hostname, port):
         
         logging.info('Starting server process listening to port {}...'.format(port))
         
-        self._exec_cmd('nohup bash /home/{}/start_irrad_server.sh {} &'.format(self.server_uname, port))
+        self._exec_cmd(hostname, 'nohup bash /home/{}/start_irrad_server.sh {} &'.format(self.server[hostname], port))
 
     def start_interpreter_process(self, port):
 
@@ -89,11 +94,11 @@ class ProcessManager(object):
         self.interpreter_proc = self._call_script(script=os.path.join(package_path, 'irrad_interpreter.py'),
                                                   args=port)
 
-    def set_server_pid(self, pid):
+    def set_server_pid(self, hostname, pid):
         
         logging.info('Server process running with PID {}'.format(pid))
         
-        self.server_pid = pid
+        self.server_pid[hostname] = pid
 
     def set_interpreter_pid(self, pid):
 
@@ -107,17 +112,17 @@ class ProcessManager(object):
                                 shell=True,
                                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0)
 
-    def _exec_cmd(self, cmd, log_stdout=False):
+    def _exec_cmd(self, hostname, cmd, log_stdout=False):
         """Execute command on server using paramikos SSH implementation"""
 
         # Sanity check
-        if self.client is None:
+        if hostname not in self.client:
             logging.warning("SSH-client not connected to server. Call {}.connect_to_server method."
                             .format(self.__class__.__name__))
             return
         
         # Execute; this is non-blocking so we have to wait until cmd has been transmitted to server before closing
-        stdin, stdout, stderr = self.client.exec_command(cmd)
+        stdin, stdout, stderr = self.client[hostname].exec_command(cmd)
         
         # No writing to stdin and stdout happens
         stdin.close()
@@ -132,21 +137,21 @@ class ProcessManager(object):
         stdout.close()
         stderr.close()
 
-    def copy_to_server(self, local_filepath, remote_filepath):
+    def copy_to_server(self, hostname, local_filepath, remote_filepath):
         """Copy local file at local_filepath to server at remote_filepath"""
 
-        sftp = self.client.open_sftp()
+        sftp = self.client[hostname].open_sftp()
         sftp.put(local_filepath, remote_filepath)
         sftp.close()
 
-    def kill_pid(self, pid, server=False):
+    def kill_pid(self, pid, hostname=False):
 
-        # We're killing a process on the server
-        if server:
+        # We're killing a process on a server
+        if hostname:
 
             logging.info('Killing server PC process with PID {}...'.format(pid))
 
-            self._exec_cmd('kill {}'.format(pid))
+            self._exec_cmd(hostname, 'kill {}'.format(pid))
 
         else:
 

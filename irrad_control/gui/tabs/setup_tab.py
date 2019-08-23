@@ -21,6 +21,9 @@ class IrradSetupTab(QtWidgets.QWidget):
         # Set layout of this widget
         self.setLayout(QtWidgets.QVBoxLayout())
 
+        # List to store server ips in
+        self.server_ips = []
+
         # Dict to store info for setup in
         self.setup = {}
 
@@ -64,6 +67,7 @@ class IrradSetupTab(QtWidgets.QWidget):
         
         # Setup te widgets for daq, session and connect
         self._setup_session()
+        self._setup_server()
         self._setup_daq()
         self._connect_input_edits()
         self._check_input()
@@ -81,7 +85,7 @@ class IrradSetupTab(QtWidgets.QWidget):
 
         # Label for session
         label_session = QtWidgets.QLabel('Irradiation session')
-        layout_session.addWidget(label_session, 0, 0, 1, 3)
+        layout_session.addWidget(label_session, 0, 0, 1, 3, alignment=QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
 
         # Label and widgets to set the output folder
         label_folder = QtWidgets.QLabel('Output folder:')
@@ -183,6 +187,14 @@ class IrradSetupTab(QtWidgets.QWidget):
         # Add to left layout
         self.left_layout.addWidget(self.left_widget)
 
+    def _setup_server(self):
+
+        self.right_widget2 = QtWidgets.QWidget()
+        layouttt = QtWidgets.QVBoxLayout()
+        self.right_widget2.setLayout(layouttt)
+
+        layouttt.addWidget(QtWidgets.QLabel('Server configuration'), alignment=QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
+
     def _setup_daq(self):
         """Inits inputs related to the setup of the data acquisition ADC"""
 
@@ -235,7 +247,7 @@ class IrradSetupTab(QtWidgets.QWidget):
 
         # Proportionality constant related widgets
         label_prop = QtWidgets.QLabel('Proportionality constant %s [1/V]:' % u'\u03bb')
-        label_prop.setToolTip('Constant translating SEM signal to actual proton beam current via I_Beam = %s * RO_scale * SEM_sig' % u'\u03bb')
+        label_prop.setToolTip('Constant translating SEM signal to actual proton beam current via I_Beam = %s * I_FS * SEM_%s' % (u'\u03A3', u'\u03bb'))
         combo_prop = QtWidgets.QComboBox()
         self._fill_combobox_items(combo_prop, proportionality_constants)
 
@@ -320,7 +332,8 @@ class IrradSetupTab(QtWidgets.QWidget):
         self.daq_widgets['ref_combos'] = combos_refs
 
         # Add this widget to right widget
-        self.right_layout.addWidget(self.right_widget)
+        self.right_widget2.layout().addWidget(self.right_widget)
+        self.right_layout.addWidget(self.right_widget2)
 
     def _handle_ref_channels(self, item, cbx):
 
@@ -491,7 +504,7 @@ class IrradSetupTab(QtWidgets.QWidget):
         self.setup['tcp'] = dict([('ip', {}), ('port', dict(self.zmq_setup.ports))])
 
         self.setup['tcp']['ip']['host'] = self.session_widgets['host_edit'].text()
-        self.setup['tcp']['ip']['server'] = self.session_widgets['server_edit'].text()
+        self.setup['tcp']['ip']['server'] = [self.session_widgets['server_edit'].text()]  # FIXME: hardcoded list
 
         # DAQ info
         self.setup['daq'] = {}
