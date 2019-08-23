@@ -5,11 +5,11 @@ from PyQt5 import QtWidgets, QtCore, QtGui
 from collections import OrderedDict
 
 # Matplotlib first 8 default colors
-MPL_COLORS = [(31, 119, 180), (255, 127, 14), (44, 160, 44), (214, 39, 40),
+_MPL_COLORS = [(31, 119, 180), (255, 127, 14), (44, 160, 44), (214, 39, 40),
               (148, 103, 189), (140, 86, 75), (227, 119, 194), (127, 127, 127)]
 
-BOLD_FONT = QtGui.QFont()
-BOLD_FONT.setBold(True)
+_BOLD_FONT = QtGui.QFont()
+_BOLD_FONT.setBold(True)
 
 
 class PlotWindow(QtWidgets.QMainWindow):
@@ -68,7 +68,7 @@ class PlotWrapperWidget(QtWidgets.QWidget):
         if hasattr(self.pw, 'show_data') and hasattr(self.pw, 'curves'):
             _sub_layout_1.addWidget(QtWidgets.QLabel('Show curve(s):'))
             all_checkbox = QtWidgets.QCheckBox('All')
-            all_checkbox.setFont(BOLD_FONT)
+            all_checkbox.setFont(_BOLD_FONT)
             all_checkbox.setChecked(True)
             _sub_layout_2.addWidget(all_checkbox)
             for curve in self.pw.curves:
@@ -231,7 +231,7 @@ class ScrollingIrradDataPlot(IrradPlotWidget):
         self.plt.setLimits(xMax=0)
 
         # Make OrderedDict of curves
-        self.curves = OrderedDict([(ch, pg.PlotCurveItem(pen=MPL_COLORS[i % len(MPL_COLORS)])) for i, ch in enumerate(self.channels)])
+        self.curves = OrderedDict([(ch, pg.PlotCurveItem(pen=_MPL_COLORS[i % len(_MPL_COLORS)])) for i, ch in enumerate(self.channels)])
 
         # Make legend entries for curves
         self.legend = pg.LegendItem(offset=(80, -50))
@@ -544,13 +544,13 @@ class BeamPositionPlot(pg.PlotWidget):
 
         if any(x in self.ro_types for x in ('sem_h_shift', 'sem_v_shift')):
             sig = 'analog'
-            self.curves[sig] = BeamPositionItem(color=MPL_COLORS[0], name=sig,
+            self.curves[sig] = BeamPositionItem(color=_MPL_COLORS[0], name=sig,
                                                 horizontal='sem_h_shift' in self.ro_types,
                                                 vertical='sem_v_shift' in self.ro_types)
 
         if any(all(x in self.ro_types for x in y) for y in [('sem_left', 'sem_right'), ('sem_up', 'sem_down')]):
             sig = 'digital'
-            self.curves[sig] = BeamPositionItem(color=MPL_COLORS[1], name=sig,
+            self.curves[sig] = BeamPositionItem(color=_MPL_COLORS[1], name=sig,
                                                 horizontal='sem_left' in self.ro_types and 'sem_right' in self.ro_types,
                                                 vertical='sem_up' in self.ro_types and 'sem_down' in self.ro_types)
 
@@ -626,12 +626,12 @@ class FluenceHist(IrradPlotWidget):
         # Histogram of fluence per row
         hist_curve = pg.PlotCurveItem()
         hist_curve.setFillLevel(0.33)
-        hist_curve.setBrush(pg.mkBrush(color=MPL_COLORS[0]))
+        hist_curve.setBrush(pg.mkBrush(color=_MPL_COLORS[0]))
 
         # Points at respective row positions
         hist_points = pg.ScatterPlotItem()
-        hist_points.setPen(color=MPL_COLORS[2], style=pg.QtCore.Qt.SolidLine)
-        hist_points.setBrush(color=MPL_COLORS[2])
+        hist_points.setPen(color=_MPL_COLORS[2], style=pg.QtCore.Qt.SolidLine)
+        hist_points.setBrush(color=_MPL_COLORS[2])
         hist_points.setSymbol('o')
         hist_points.setSize(10)
 
@@ -640,7 +640,7 @@ class FluenceHist(IrradPlotWidget):
 
         # Horizontal line indication the mean fluence over all rows
         mean_curve = pg.InfiniteLine(angle=0)
-        mean_curve.setPen(color=MPL_COLORS[1], width=2)
+        mean_curve.setPen(color=_MPL_COLORS[1], width=2)
         self.p_label = pg.InfLineLabel(mean_curve, position=0.2)
         self.n_label = pg.InfLineLabel(mean_curve, position=0.8)
 
@@ -664,7 +664,7 @@ class FluenceHist(IrradPlotWidget):
         self.curves['hist'].setData(range(len(fluence) + 1), fluence, stepMode=True)
         self.curves['hist_points'].setData(x=np.arange(len(fluence)) + 0.5, y=fluence)
         self.curves['hist_errors'].setData(x=np.arange(len(fluence)) + 0.5, y=fluence,
-                                        height=np.array(fluence_err), pen=MPL_COLORS[2])
+                                        height=np.array(fluence_err), pen=_MPL_COLORS[2])
         self.curves['mean'].setValue(mean)
 
         p_label = 'Mean: ({:.2E} +- {:.2E}) protons / cm^2'.format(mean, std)

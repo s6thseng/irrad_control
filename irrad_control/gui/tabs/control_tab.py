@@ -3,13 +3,13 @@ from PyQt5 import QtWidgets, QtCore
 from collections import OrderedDict
 
 
-class IrradControl(QtWidgets.QWidget):
+class IrradControlTab(QtWidgets.QWidget):
     """Control widget for the irradiation control software"""
 
     sendCmd = QtCore.pyqtSignal(dict)
 
     def __init__(self, irrad_setup, parent=None):
-        super(IrradControl, self).__init__(parent)
+        super(IrradControlTab, self).__init__(parent)
 
         # Layouts; split in quadrants
         self.main_layout = QtWidgets.QHBoxLayout()

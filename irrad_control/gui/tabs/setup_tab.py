@@ -5,10 +5,10 @@ import subprocess
 from PyQt5 import QtWidgets, QtCore
 from irrad_control import roe_output, ro_scales, ads1256
 from irrad_control import proportionality_constants, server_ips, hardness_factors, config_path, daq_devices
-from irrad_control.gui_widgets.sub_windows import ZmqSetupWindow
+from irrad_control.gui.widgets import ZmqSetupWindow
 
 
-class IrradSetup(QtWidgets.QWidget):
+class IrradSetupTab(QtWidgets.QWidget):
     """Setup widget for the irradiation control software"""
 
     # Signal emitted when setup is completed
@@ -16,7 +16,7 @@ class IrradSetup(QtWidgets.QWidget):
     serverIPsFound = QtCore.pyqtSignal(list)
 
     def __init__(self, parent=None):
-        super(IrradSetup, self).__init__(parent)
+        super(IrradSetupTab, self).__init__(parent)
 
         # Set layout of this widget
         self.setLayout(QtWidgets.QVBoxLayout())

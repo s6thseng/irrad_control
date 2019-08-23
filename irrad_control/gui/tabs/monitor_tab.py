@@ -1,13 +1,13 @@
 from PyQt5 import QtCore, QtWidgets
 from collections import OrderedDict
-from irrad_control.gui_widgets.plot_widgets import RawDataPlot, BeamPositionPlot, PlotWrapperWidget, BeamCurrentPlot, FluenceHist
+from irrad_control.gui.widgets import RawDataPlot, BeamPositionPlot, PlotWrapperWidget, BeamCurrentPlot, FluenceHist
 
 
-class IrradMonitor(QtWidgets.QWidget):
+class IrradMonitorTab(QtWidgets.QWidget):
     """Widget which implements a data monitor"""
 
     def __init__(self, daq_setup, parent=None):
-        super(IrradMonitor, self).__init__(parent)
+        super(IrradMonitorTab, self).__init__(parent)
 
         self.daq_setup = daq_setup
 
