@@ -19,8 +19,9 @@ Ulrich Lukas, 2017-03-03
 """
 import time
 import wiringpi as wp
-from ADS1256_definitions import *
-import ADS1256_default_config
+import irrad_control.devices.adc.ADS1256_default_config as ADS1256_default_config
+from irrad_control.devices.adc.ADS1256_definitions import *
+
 
 class ADS1256(object):
     """Python class for interfacing the ADS1256 and ADS1255 analog to
