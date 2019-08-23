@@ -3,7 +3,7 @@ import sys
 import logging
 import paramiko
 import subprocess
-from irrad_control import config_server_script
+from irrad_control import package_path, config_server_script
 
 
 class ProcessManager(object):
@@ -46,8 +46,9 @@ class ProcessManager(object):
         # Something went wrong
         except (paramiko.BadHostKeyException, paramiko.AuthenticationException, paramiko.SSHException) as e:
             # We need to add key, let user know
-            if type(e) in (paramiko.BadHostKeyException,):
-                msg = "Server's host key could not be verified. Try adding key via ssh-keygen and ssh-copy-id!"
+            if type(e) is paramiko.BadHostKeyException:
+                msg = "Server's host key could not be verified. Try creating key on host PC via" \
+                      " ssh-keygen and copy to server via ssh-copy-id!"
                 raise e(msg)
             else:
                 raise e
@@ -55,7 +56,7 @@ class ProcessManager(object):
         # Success
         logging.info('Successfully connected to server {}@{}!'.format(username, hostname))
         
-    def configure_server(self, py_update=False, py_version=None, git_pull=False, branch=False):
+    def configure_server(self, py_version=None, py_update=False, git_pull=False, branch=False):
 
         remote_script = '/home/{}/config_server.sh'.format(self.server_uname)
 
@@ -69,8 +70,8 @@ class ProcessManager(object):
         _rs += ' -p' if git_pull else ''
         _rs += '' if not branch else ' -b={}'.format(branch)
 
-        # Run script to determine wheter server Pi has miniconda and all packages installed
-        self.exec_cmd('bash {}'.format(_rs), log_stdout=True)
+        # Run script to determine whether server RPi has miniconda and all packages installed
+        self._exec_cmd('bash {}'.format(_rs), log_stdout=True)
 
         # Remove script
         self._exec_cmd('rm {}'.format(remote_script))
@@ -79,27 +80,28 @@ class ProcessManager(object):
         
         logging.info('Starting server process listening to port {}...'.format(port))
         
-        self._exec_cmd('nohup bash start_irrad_server.sh {} &'.format(port))
-        
-    def kill_server(self):
-        
-        if self._server_pid:
-        
-            logging.info('Shutting down server process with PID {}...'.format(self._server_pid))
-            
-            self.exec_cmd('kill {}'.format(self._server_pid))
-            
-        else:
-            
-            self.exec_cmd('killall python')
-        
+        self._exec_cmd('nohup bash /home/{}/start_irrad_server.sh {} &'.format(self.server_uname, port))
+
+    def start_interpreter_process(self, port):
+
+        logging.info('Starting interpreter process listening to port {}...'.format(port))
+
+        self.interpreter_proc = self._call_script(script=os.path.join(package_path, 'irrad_interpreter.py'),
+                                                  args=port)
+
     def set_server_pid(self, pid):
         
         logging.info('Server process running with PID {}'.format(pid))
         
-        self._server_pid = pid
+        self.server_pid = pid
 
-    def _call_subprocess(self, cmd, script, args):
+    def set_interpreter_pid(self, pid):
+
+        logging.info('Interpreter process running with PID {}'.format(pid))
+
+        self.interpreter_pid = pid
+
+    def _call_script(self, script, args, cmd=None):
 
         return subprocess.Popen('{} {} {}'.format('python' if not cmd else cmd, script, args),
                                 shell=True,
@@ -136,3 +138,18 @@ class ProcessManager(object):
         sftp = self.client.open_sftp()
         sftp.put(local_filepath, remote_filepath)
         sftp.close()
+
+    def kill_pid(self, pid, server=False):
+
+        # We're killing a process on the server
+        if server:
+
+            logging.info('Killing server PC process with PID {}...'.format(pid))
+
+            self._exec_cmd('kill {}'.format(pid))
+
+        else:
+
+            logging.info('Killing host PC process with PID {}...'.format(pid))
+
+            subprocess.Popen(['kill', pid])
