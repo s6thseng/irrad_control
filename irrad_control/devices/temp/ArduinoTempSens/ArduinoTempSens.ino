@@ -14,8 +14,8 @@ temperature values can be recorded.
 #define TEMPNOMINAL 25
 // Average each temperature value over 10 analog readS
 #define NSAMPLES 5
-// The beta coefficient of the thermistor (usually 3000-4000)
-#define BETACOEFF 3450
+// The beta coefficient of the thermistor (usually 3000-4000); EPC B57891-M103 NTC Thermistor
+#define BETACOEFF 3950
 // Resistivity of the resistors in series to the NTC, forming voltage divider
 #define RESISTOR 10000
 // Kelvin

@@ -1,10 +1,9 @@
-"""Class to read from Arduino temperature sensor setup"""
-
 import serial
 import logging
 
 
 class ArduinoTempSens(object):
+    """Class to read from Arduino temperature sensor setup"""
 
     def __init__(self, port="/dev/ttyUSB0", baudrate=9600, timeout=5):
         super(ArduinoTempSens, self).__init__()
