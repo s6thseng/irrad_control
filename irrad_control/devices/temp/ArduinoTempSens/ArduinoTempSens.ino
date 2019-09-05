@@ -95,14 +95,15 @@ void loop(void) {
         // Get temperature as degrees Celsius
         temp_celsius = get_temp(THERMISTORPINS[temp_pin]);
 
-        // Send out, two decimal places
+        // Send out, two decimal places, wait
         Serial.println(temp_celsius, 2);
+        delay(10);
       }
       else {
         // An Oooopsie happened
         Serial.println(999);
        }
-      c = Serial.read();   
+      c = Serial.read();
     }
   }
 }
