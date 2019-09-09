@@ -428,8 +428,8 @@ class IrradControlWin(QtWidgets.QMainWindow):
                     self.tabs.setCurrentIndex(self.tabs.indexOf(self.monitor_tab))
 
                     # Send command to find where stage is and what the speeds are
-                    #self.send_cmd('stage', 'pos')
-                    #self.send_cmd('stage', 'get_speed')
+                    self.send_cmd('stage', 'pos')
+                    self.send_cmd('stage', 'get_speed')
 
                 elif reply == 'shutdown':
 

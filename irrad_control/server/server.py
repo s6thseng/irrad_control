@@ -118,10 +118,10 @@ class IrradServer(multiprocessing.Process):
         data_thread.start()
 
         # Init stage
-        #self.xy_stage = ZaberXYStage()
+        self.xy_stage = ZaberXYStage(serial_port="/dev/ttyUSB0")
 
         # Init temp sens
-        self.temp_sens = ArduinoTempSens()
+        self.temp_sens = ArduinoTempSens(port="/dev/ttyUSB1")
 
         # Start data sending thread
         temp_thread = threading.Thread(target=self.send_temp)

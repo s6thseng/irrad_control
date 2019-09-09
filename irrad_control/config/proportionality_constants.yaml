@@ -17,4 +17,11 @@ all:
     unit: 1/V
     device: SEM_C
     ascitime: Tue Feb 5 14:50:03 2019
-default: lambda_2
+  lambda_3:
+    nominal: 850.50e-3
+    sigma: 3.634e-4
+    hv_sem: 100 V
+    unit: 1/V
+    device: SEM_C
+    ascitime: Thu Aug 8 14:00:00 2019
+default: lambda_3
