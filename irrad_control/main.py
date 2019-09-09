@@ -198,10 +198,12 @@ class IrradControlWin(QtWidgets.QMainWindow):
         self.interpreter = IrradInterpreter(setup)
         self.interpreter.start()
 
+        time.sleep(2.5)
+
         # Wait for interpreter to start receive data
-        while not self.interpreter.is_receiving.wait(1e-1):
-            # Solves (hopefully) being stuck here because is_set() event not processed occasionally
-            QtWidgets.QApplication.processEvents()
+        #while not self.interpreter.is_receiving.wait(1e-1):
+        #    # Solves (hopefully) being stuck here because is_set() event not processed occasionally
+        #    QtWidgets.QApplication.processEvents()
 
         # Init server
         self._init_server()
@@ -375,6 +377,10 @@ class IrradControlWin(QtWidgets.QMainWindow):
             elif data['data']['status'] == 'finished':
 
                 self.control_tab.scan_actions(data['data']['status'])
+
+        elif data['meta']['type'] == 'temp':
+
+            self.monitor_tab.plots[adc]['temp_plot'].set_data(data)
             
     def send_cmd(self, target, cmd, cmd_data=None):
         """Send a command *cmd* to a target *target* running within the server or interpreter process.
@@ -422,8 +428,8 @@ class IrradControlWin(QtWidgets.QMainWindow):
                     self.tabs.setCurrentIndex(self.tabs.indexOf(self.monitor_tab))
 
                     # Send command to find where stage is and what the speeds are
-                    self.send_cmd('stage', 'pos')
-                    self.send_cmd('stage', 'get_speed')
+                    #self.send_cmd('stage', 'pos')
+                    #self.send_cmd('stage', 'get_speed')
 
                 elif reply == 'shutdown':
 
@@ -479,6 +485,9 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         # Connect to stage data
         data_sub.connect(self._tcp_addr(self.setup['tcp']['port']['stage'], ip=self.setup['tcp']['ip']['server']))
+
+        # Connect to temp data
+        data_sub.connect(self._tcp_addr(self.setup['tcp']['port']['temp'], ip=self.setup['tcp']['ip']['server']))
 
         data_sub.setsockopt(zmq.SUBSCRIBE, '')
         

@@ -9,6 +9,7 @@ from adc.ADS1256_definitions import *
 from adc.ADS1256_drates import ads1256_drates
 from adc.pipyadc import ADS1256
 from xystage import ZaberXYStage
+from arduino_temp_sens import ArduinoTempSens
 
 
 class IrradServer(multiprocessing.Process):
@@ -19,6 +20,7 @@ class IrradServer(multiprocessing.Process):
 
         # Attributes for internal handling of sending data, receiving and commands
         self.stop_send_data = threading.Event()
+        self.stop_send_temp = threading.Event()
         self.stop_recv_cmds = multiprocessing.Event()
         self._busy_cmd = False
 
@@ -116,7 +118,14 @@ class IrradServer(multiprocessing.Process):
         data_thread.start()
 
         # Init stage
-        self.xy_stage = ZaberXYStage()
+        #self.xy_stage = ZaberXYStage()
+
+        # Init temp sens
+        self.temp_sens = ArduinoTempSens()
+
+        # Start data sending thread
+        temp_thread = threading.Thread(target=self.send_temp)
+        temp_thread.start()
 
     def send_data(self):
         """Sends data from dedicated thread"""
@@ -138,6 +147,26 @@ class IrradServer(multiprocessing.Process):
 
             # Send
             data_pub.send_json({'meta': _meta, 'data': _data})
+
+    def send_temp(self):
+        """Sends temp data from dedicated thread"""
+
+        # Needs to be specified within this func since its run on dedicated thread
+        temp_pub = self.context.socket(zmq.PUB)
+        temp_pub.set_hwm(10)  # drop data if too slow
+        temp_pub.bind(self._tcp_addr(self.tcp_setup['port']['temp']))
+
+        # Send data als long as specified
+        while not self.stop_send_temp.is_set():
+            # Read raw temp data
+            raw_temp = self.temp_sens.get_temp([0, 2])
+
+            _data = {'Temp. 0': raw_temp[0], 'Temp. 1': raw_temp[2]}
+
+            # Add meta data
+            _meta = {'timestamp': time.time(), 'name': self.adc_name, 'type': 'temp'}
+            # Send
+            temp_pub.send_json({'meta': _meta, 'data': _data})
 
     def _send_reply(self, reply, _type, sender, data=None):
 

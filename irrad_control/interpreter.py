@@ -27,7 +27,7 @@ class IrradInterpreter(multiprocessing.Process):
         self.name = 'interpreter' if name is None else name
 
         # Set the maximum table length before flushing data to hard drive
-        self._max_buf_len = 1e6
+        self._max_buf_len = 1e2
 
         self.stage_stats = xy_stage_stats.copy()
 
@@ -94,6 +94,8 @@ class IrradInterpreter(multiprocessing.Process):
         handler = handlers.PUBHandler(log_pub)
         logging.getLogger().addHandler(handler)
 
+        time.sleep(2.5)
+
     def _setup_daq(self):
 
         # Data writing
@@ -106,6 +108,7 @@ class IrradInterpreter(multiprocessing.Process):
         self.fluence_table = {}
         self.result_table = {}
         self.offset_table = {}
+        self.temp_table = {}
 
         # Store data per interpretation cycle and ADC
         self.raw_data = {}
@@ -114,6 +117,7 @@ class IrradInterpreter(multiprocessing.Process):
         self.result_data = {}
         self.auto_zero_offset = {}
         self._auto_zero_vals = {}
+        self.temp_data = {}
 
         # Possible channels from which to get the beam positions
         self.pos_types = {'h': {'digital': ['sem_left', 'sem_right'], 'analog': ['sem_h_shift']},
@@ -146,6 +150,7 @@ class IrradInterpreter(multiprocessing.Process):
         # Attributes indicating start and stop of stage
         self._stage_scanning = False
         self._store_fluence_data = False
+        self._store_temp_data = False
 
         # Fluence
         self._fluence = {}
@@ -157,6 +162,7 @@ class IrradInterpreter(multiprocessing.Process):
             # Make structured arrays for data organization when dropping to table
             raw_dtype = [('timestamp', '<f8')] + [(ch, '<f4') for ch in self.channels[adc]]
             beam_dtype = [('timestamp', '<f8')]
+            temp_dtype = [('timestamp', '<f8')] + [(temp, '<f2') for temp in ('Temp. 0', 'Temp. 1')]
 
             # Check which data will be interpreted
             # Beam position
@@ -179,6 +185,7 @@ class IrradInterpreter(multiprocessing.Process):
             self.beam_data[adc] = np.zeros(shape=1, dtype=beam_dtype)
             self.fluence_data[adc] = np.zeros(shape=1, dtype=fluence_dtype)
             self.result_data[adc] = np.zeros(shape=1, dtype=result_dtype)
+            self.temp_data[adc] = np.zeros(shape=1, dtype=temp_dtype)
 
             # Auto zeroing offset
             self.auto_zero_offset[adc] = np.zeros(shape=1, dtype=raw_dtype)
@@ -203,6 +210,9 @@ class IrradInterpreter(multiprocessing.Process):
             self.offset_table[adc] = self.tables[adc].create_table(self.tables[adc].root,
                                                                    description=self.auto_zero_offset[adc].dtype,
                                                                    name='RawOffset')
+            self.temp_table[adc] = self.tables[adc].create_table(self.tables[adc].root,
+                                                                 description=self.temp_data[adc].dtype,
+                                                                 name='Temperature')
 
     def interpret_data(self, raw_data):
         """Interpretation of the data"""
@@ -302,6 +312,14 @@ class IrradInterpreter(multiprocessing.Process):
                     beam_data['data']['current'][sig_type] = self.beam_data[adc][dname] = current
 
             self.data_pub.send_json(beam_data)
+
+        elif meta_data['type'] == 'temp':
+
+            self.temp_data[adc]['timestamp'] = meta_data['timestamp']
+            for temp in data:
+                self.temp_data[adc][temp] = data[temp]
+
+            self._store_temp_data = True
 
         elif meta_data['type'] == 'stage':
 
@@ -442,6 +460,10 @@ class IrradInterpreter(multiprocessing.Process):
                 self.fluence_table[adc].append(self.fluence_data[adc])
                 self._store_fluence_data = False
 
+            if self._store_temp_data:
+                self.temp_table[adc].append(self.temp_data[adc])
+                self._store_temp_data = False
+
             # If tables are getting too large, flush buffer to hard drive
             if any(t[adc].nrows % self._max_buf_len == 0 and t[adc].nrows != 0 for t in (self.raw_table,
                                                                                          self.beam_table,
@@ -453,7 +475,7 @@ class IrradInterpreter(multiprocessing.Process):
 
         # Create subscriber for raw and XY-Stage data
         data_sub = self.context.socket(zmq.SUB)
-        for port in ('data', 'stage'):
+        for port in ('data', 'stage', 'temp'):
             data_sub.connect(self._tcp_addr(self.tcp_setup['port'][port], ip=self.tcp_setup['ip']['server']))
         data_sub.setsockopt(zmq.SUBSCRIBE, '')
 

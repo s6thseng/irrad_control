@@ -385,6 +385,22 @@ class BeamCurrentPlot(ScrollingIrradDataPlot):
         self.plt.setLabel('right', text='Beam current', units='A')
 
 
+class TemperatureDataPlot(ScrollingIrradDataPlot):
+
+    def __init__(self, temp_setup, daq_device=None, parent=None):
+
+        self.temp_setup = temp_setup
+
+        super(TemperatureDataPlot, self).__init__(channels=['Temp. 0', 'Temp. 1'], units={'right': 'C', 'left': 'C'},
+                                                  name=type(self).__name__ + ('' if daq_device is None else ' ' + daq_device),
+                                                  parent=parent)
+
+        self.plt.setLabel('left', text='Temperature', units='C')
+        self.plt.hideAxis('left')
+        self.plt.showAxis('right')
+        self.plt.setLabel('right', text='Temperature', units='C')
+
+
 class BeamPositionItem:
     """This class implements three pyqtgraph items in order to display a reticle with a circle in its intersection."""
 
