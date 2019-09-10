@@ -84,7 +84,7 @@ class IrradInterpreter(multiprocessing.Process):
             raise ValueError('Invalid log level: {}'.format(self.session_setup['loglevel']))
 
         # Set level
-        logging.basicConfig(level=numeric_level)
+        logging.getLogger().setLevel(level=numeric_level)
 
         # Publish log
         log_pub = self.context.socket(zmq.PUB)

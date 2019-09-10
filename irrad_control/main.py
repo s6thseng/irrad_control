@@ -31,6 +31,13 @@ try:
 except (DistributionNotFound, KeyError):
     AUTHORS = 'Not defined'
 
+# py3
+try:
+    _LOG_LEVELS = logging._levelToName
+# py2
+except AttributeError:
+    _LOG_LEVELS = logging._levelNames
+
 # needed to dump OrderedDict into file, representer for ordereddict (https://stackoverflow.com/a/8661021)
 represent_dict_order = lambda self, data: self.represent_mapping('tag:yaml.org,2002:map', data.items())
 yaml.add_representer(OrderedDict, represent_dict_order)
@@ -42,7 +49,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
     # PyQt signals
     data_received = QtCore.pyqtSignal(dict)  # Signal for data
     reply_received = QtCore.pyqtSignal(dict)  # Signal for reply
-    log_received = QtCore.pyqtSignal(str)  # Signal for log
+    log_received = QtCore.pyqtSignal(dict)  # Signal for log
 
     def __init__(self, parent=None):
         super(IrradControlWin, self).__init__(parent)
@@ -200,11 +207,6 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         time.sleep(2.5)
 
-        # Wait for interpreter to start receive data
-        #while not self.interpreter.is_receiving.wait(1e-1):
-        #    # Solves (hopefully) being stuck here because is_set() event not processed occasionally
-        #    QtWidgets.QApplication.processEvents()
-
         # Init server
         self._init_server()
 
@@ -244,6 +246,9 @@ class IrradControlWin(QtWidgets.QMainWindow):
     def _init_logging(self, loglevel=logging.INFO):
         """Initializes a custom logging handler and redirects stdout/stderr"""
 
+        # Store loglevel of remote processes; subprocesses send log level and message separately
+        self._remote_loglevel = 0
+
         # Set logging level
         logging.getLogger().setLevel(loglevel)
 
@@ -260,15 +265,13 @@ class IrradControlWin(QtWidgets.QMainWindow):
         
         logging.info('Started "irrad_control" on %s' % platform.system())
 
-    def handle_log(self, log):
+    def handle_log(self, log_dict):
 
-        num_level = 0  # NOTSET
-        for log_lvl in [lvl for lvl in logging._levelNames.keys() if isinstance(lvl, str)]:
-            if log_lvl in log.upper():
-                num_level = getattr(logging, log_lvl, None)
-                logging.debug(str(num_level))
-                break
-        logging.log(level=num_level, msg=log)
+        if 'level' in log_dict:
+            self._remote_loglevel = log_dict['level']
+
+        elif 'log' in log_dict:
+            logging.log(level=self._remote_loglevel, msg=log_dict['log'])
 
     def _init_server(self):
 
@@ -523,10 +526,18 @@ class IrradControlWin(QtWidgets.QMainWindow):
         
         logging.info('Log receiver ready')
         
-        while self.stop_recv_log:
+        while not self.stop_recv_log.is_set():
             log = log_sub.recv()
             if log:
-                self.log_received.emit(log.strip())
+                log_dict = {}
+
+                if log.upper() in [lvl for lvl in _LOG_LEVELS.keys() if isinstance(lvl, str)]:
+                    log_dict['level'] = getattr(logging, log.upper(), None)
+
+                else:
+                    log_dict['log'] = log.strip()
+
+                self.log_received.emit(log_dict)
 
     def handle_messages(self, message, ms=4000):
         """Handles messages from the tabs shown in QMainWindows statusBar"""
