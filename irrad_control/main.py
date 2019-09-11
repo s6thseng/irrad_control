@@ -12,7 +12,7 @@ from threading import Event
 
 # Package imports
 from irrad_control.utils import CustomHandler, LoggingStream, log_levels, Worker, ProcessManager
-from irrad_control.gui.widgets import DaqInfoWidget
+from irrad_control.gui.widgets import DaqInfoWidget, LoggingWidget
 from irrad_control.gui.tabs import IrradSetupTab, IrradControlTab, IrradMonitorTab
 
 
@@ -172,6 +172,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         # Adjust logging level
         logging.getLogger().setLevel(setup['session']['loglevel'])
+        self.log_widget.change_level(setup['session']['loglevel'])
 
         # Update tab widgets accordingly
         self.update_tabs()
@@ -189,12 +190,11 @@ class IrradControlWin(QtWidgets.QMainWindow):
         """Initializes corresponding log dock"""
 
         # Widget to display log in, we only want to read log
-        self.log_console = QtWidgets.QPlainTextEdit()
-        self.log_console.setReadOnly(True)
+        self.log_widget = LoggingWidget()
         
         # Dock in which text widget is placed to make it closable without losing log content
         self.log_dock = QtWidgets.QDockWidget()
-        self.log_dock.setWidget(self.log_console)
+        self.log_dock.setWidget(self.log_widget)
         self.log_dock.setAllowedAreas(QtCore.Qt.BottomDockWidgetArea)
         self.log_dock.setFeatures(QtWidgets.QDockWidget.DockWidgetClosable)
         self.log_dock.setWindowTitle('Log')
@@ -230,14 +230,13 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         # Create logger instance
         self.logger = CustomHandler(self.main_widget)
-        self.logger.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 
         # Add custom logger
         logging.getLogger().addHandler(self.logger)
 
         # Connect logger signal to logger console
-        LoggingStream.stdout().messageWritten.connect(lambda msg: self.log_console.appendPlainText(msg))
-        LoggingStream.stderr().messageWritten.connect(lambda msg: self.log_console.appendPlainText(msg))
+        LoggingStream.stdout().messageWritten.connect(lambda msg: self.log_widget.write_log(msg))
+        LoggingStream.stderr().messageWritten.connect(lambda msg: self.log_widget.write_log(msg))
         
         logging.info('Started "irrad_control" on %s' % platform.system())
 

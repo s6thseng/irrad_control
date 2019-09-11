@@ -52,6 +52,9 @@ class CustomHandler(logging.Handler):
     def __init__(self, parent):
         super(CustomHandler, self).__init__()
 
+        # Set format
+        self.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
     def emit(self, record):
         msg = self.format(record)
         if msg:
