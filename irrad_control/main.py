@@ -11,7 +11,7 @@ from PyQt5 import QtCore, QtWidgets, QtGui
 from threading import Event
 
 # Package imports
-from irrad_control.utils import CustomHandler, LoggingStream, Worker, ProcessManager
+from irrad_control.utils import CustomHandler, LoggingStream, log_levels, Worker, ProcessManager
 from irrad_control.gui.widgets import DaqInfoWidget
 from irrad_control.gui.tabs import IrradSetupTab, IrradControlTab, IrradMonitorTab
 
@@ -25,11 +25,6 @@ try:
     AUTHORS = message_from_string(pkgInfo)['Author']
 except (DistributionNotFound, KeyError):
     AUTHORS = 'Not defined'
-
-try:
-    _LOG_LEVELS = logging._levelToName  #py3
-except AttributeError:
-    _LOG_LEVELS = logging._levelNames  #py2
 
 # needed to dump OrderedDict into file, representer for ordereddict (https://stackoverflow.com/a/8661021)
 represent_dict_order = lambda self, data: self.represent_mapping('tag:yaml.org,2002:map', data.items())
@@ -228,7 +223,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         # Store loglevel of remote processes; subprocesses send log level and message separately
         self._remote_loglevel = 0
-        self._loglevel_names = [lvl for lvl in _LOG_LEVELS.keys() if isinstance(lvl, str)]
+        self._loglevel_names = [lvl for lvl in log_levels.keys() if isinstance(lvl, str)]
 
         # Set logging level
         logging.getLogger().setLevel(loglevel)

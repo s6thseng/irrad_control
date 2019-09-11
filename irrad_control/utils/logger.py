@@ -2,6 +2,11 @@ import sys
 import logging
 from PyQt5 import QtCore
 
+try:
+    log_levels = logging._levelToName  #py3
+except AttributeError:
+    log_levels = logging._levelNames  #py2
+
 
 class LoggingStream(QtCore.QObject):
     """
