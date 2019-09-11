@@ -26,6 +26,11 @@ try:
 except (DistributionNotFound, KeyError):
     AUTHORS = 'Not defined'
 
+try:
+    _LOG_LEVELS = logging._levelToName  #py3
+except AttributeError:
+    _LOG_LEVELS = logging._levelNames  #py2
+
 # needed to dump OrderedDict into file, representer for ordereddict (https://stackoverflow.com/a/8661021)
 represent_dict_order = lambda self, data: self.represent_mapping('tag:yaml.org,2002:map', data.items())
 yaml.add_representer(OrderedDict, represent_dict_order)
@@ -37,7 +42,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
     # PyQt signals
     data_received = QtCore.pyqtSignal(dict)  # Signal for data
     reply_received = QtCore.pyqtSignal(dict)  # Signal for reply
-    log_received = QtCore.pyqtSignal(str)  # Signal for log
+    log_received = QtCore.pyqtSignal(dict)  # Signal for log
 
     def __init__(self, parent=None):
         super(IrradControlWin, self).__init__(parent)
@@ -120,7 +125,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         self._init_log_dock()
         
         self.sub_splitter.setSizes([int(1. / 3. * self.width()), int(2. / 3. * self.width())])
-        self.main_splitter.setSizes([int(2. / 3. * self.height()), int(1. / 3. * self.height())])
+        self.main_splitter.setSizes([int(0.8 * self.height()), int(0.2 * self.height())])
         
     def _init_menu(self):
         """Initialize the menu bar of the IrradControlWin"""
@@ -156,14 +161,6 @@ class IrradControlWin(QtWidgets.QMainWindow):
             if name == 'Setup':
                 self.setup_tab = IrradSetupTab(parent=self)
                 self.setup_tab.setupCompleted.connect(lambda setup: self._init_setup(setup))
-                self.setup_tab.serverIPsFound.connect(lambda ip_list:
-                                                      self.handle_messages(
-                                                          'No servers found'
-                                                          if not ip_list else
-                                                          'Found server(s): {}'.format(', '.join(ip_list))))
-                self.handle_messages('Scanning network for known servers...', 0)
-                self.threadpool.start(Worker(func=self.setup_tab._find_available_servers))
-
                 tw[name] = self.setup_tab
             else:
                 tw[name] = QtWidgets.QWidget()
@@ -229,6 +226,10 @@ class IrradControlWin(QtWidgets.QMainWindow):
     def _init_logging(self, loglevel=logging.INFO):
         """Initializes a custom logging handler and redirects stdout/stderr"""
 
+        # Store loglevel of remote processes; subprocesses send log level and message separately
+        self._remote_loglevel = 0
+        self._loglevel_names = [lvl for lvl in _LOG_LEVELS.keys() if isinstance(lvl, str)]
+
         # Set logging level
         logging.getLogger().setLevel(loglevel)
 
@@ -245,15 +246,13 @@ class IrradControlWin(QtWidgets.QMainWindow):
         
         logging.info('Started "irrad_control" on %s' % platform.system())
 
-    def handle_log(self, log):
+    def handle_log(self, log_dict):
 
-        num_level = 0  # NOTSET
-        for log_lvl in [lvl for lvl in logging._levelNames.keys() if isinstance(lvl, str)]:
-            if log_lvl in log.upper():
-                num_level = getattr(logging, log_lvl, None)
-                logging.debug(str(num_level))
-                break
-        logging.log(level=num_level, msg=log)
+        if 'level' in log_dict:
+            self._remote_loglevel = log_dict['level']
+
+        elif 'log' in log_dict:
+            logging.log(level=self._remote_loglevel, msg=log_dict['log'])
 
     def _init_subprocesses(self):
 
@@ -515,7 +514,14 @@ class IrradControlWin(QtWidgets.QMainWindow):
         while not self.stop_recv_log.is_set():
             log = log_sub.recv()
             if log:
-                self.log_received.emit(log.strip())
+                log_dict = {}
+
+                if log.upper() in self._loglevel_names:
+                    log_dict['level'] = getattr(logging, log.upper(), None)
+                else:
+                    log_dict['log'] = log.strip()
+
+                self.log_received.emit(log_dict)
 
     def handle_messages(self, message, ms=4000):
         """Handles messages from the tabs shown in QMainWindows statusBar"""
