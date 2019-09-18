@@ -79,14 +79,12 @@ class IrradSetupTab(QtWidgets.QWidget):
 
         # Dict to store info for setup in
         self.setup = {}
-        self.server_setup = ServerSetupWidget()
         self.irrad_setup = IrradSetupWidget()
         self.irrad_setup.setup_widgets['selection'].serverSelection.connect(lambda selection: self.handle_server(selection))
+        self.server_setup = ServerSetupWidget()
 
+        # State of setup tab
         self.isSetup = False
-
-        # Store widgets for daq and session input
-        self.session_widgets = {}
 
         # Connect signal
         self.setupCompleted.connect(self.set_read_only)
@@ -138,58 +136,77 @@ class IrradSetupTab(QtWidgets.QWidget):
     def _save_setup(self):
         """Save setup dict to yaml file and save in output path"""
 
-        f = os.path.join(self.output_path, '{}_{}.yaml'.format(self.outfile, self.daq_widgets['name_combo'].currentText()))
-        with open(f, 'w') as _setup:
+        with open(self.setup['session']['outfile'] + '.yaml', 'w') as _setup:
             yaml.safe_dump(self.setup, _setup, default_flow_style=False)
 
     def update_setup(self):
         """Update the info into the setup dict"""
 
-        # Update
-        self.output_path = self.session_widgets['folder_edit'].text()
-        self.outfile = self.session_widgets['outfile_edit'].text() or self.session_widgets['outfile_edit'].placeholderText()
-
-        # Session setup
+        # General info first; session
         self.setup['session'] = {}
+        self.setup['session']['loglevel'] = self.irrad_setup.setup_widgets['session'].widgets['logging_combo'].currentText()
+        self.setup['session']['outfolder'] = self.irrad_setup.setup_widgets['session'].widgets['folder_edit'].text()
+        _out_edit = self.irrad_setup.setup_widgets['session'].widgets['outfile_edit']
+        _outfile = _out_edit.text() or _out_edit.placeholderText()
+        self.setup['session']['outfile'] = os.path.join(self.setup['session']['outfolder'], _outfile)
 
-        self.setup['session']['loglevel'] = self.session_widgets['logging_combo'].currentText()
-        self.setup['session']['outfile'] = os.path.join(self.output_path, self.outfile)
-        self.setup['session']['outfolder'] = self.output_path
+        # Network
+        self.setup['host'] = self.irrad_setup.setup_widgets['network'].widgets['host_edit'].text()
+        self.setup['port'] = dict(self.irrad_setup.setup_widgets['network'].zmq_win.ports)
 
-        # DAQ setup
-        self.setup['tcp'] = dict([('ip', {}), ('port', dict(self.zmq_setup.ports))])
+        # Server
+        self.setup['server'] = {}
+        # Loop over servers
+        for server in self.server_setup.server_ips:
 
-        self.setup['tcp']['ip']['host'] = self.session_widgets['host_edit'].text()
-        self.setup['tcp']['ip']['server'] = [self.session_widgets['server_edit'].text()]  # FIXME: hardcoded list
+            # Make temporary setup per server
+            tmp_setup = {}
 
-        # DAQ info
-        self.setup['daq'] = {}
+            # Name
+            tmp_setup['name'] = self.server_setup.server_ips[server]
 
-        # Make tmp dict to store later in setup dict
-        tmp_daq = {}
+            # Devices
+            tmp_setup['devices'] = {}
 
-        tmp_daq['channels'] = [ce.text() for ce in self.daq_widgets['channel_edits'] if ce.text()]
+            for device in [d for d in self.server_setup.setup_widgets[server]['device'] if self.server_setup.setup_widgets[server]['device'][d].isChecked()]:
 
-        tmp_daq['types'] = [tc.currentText() for i, tc in enumerate(self.daq_widgets['type_combos'])
-                            if self.daq_widgets['channel_edits'][i].text()]
+                # Stage takes no setup, just mark as true
+                if device == 'stage':
+                    tmp_setup['devices'][device] = True
 
-        tmp_daq['ch_numbers'] = [i if self.daq_widgets['ref_combos'][i].currentText() == 'GND' else (i, -1 + int(self.daq_widgets['ref_combos'][i].currentText())) for i, w in enumerate(self.daq_widgets['channel_edits']) if w.text()]
+                # Temp sensor takes number of sensor and name
+                elif device == 'temp':
+                    temp_chbxs = self.server_setup.setup_widgets[server]['temp']['temp_chbxs']
+                    sensors = [i for i in range(len(temp_chbxs)) if temp_chbxs[i].isChecked()]
+                    names = [e.text() or e.placeholderText() for i, e in enumerate(self.server_setup.setup_widgets[server]['temp']['temp_edits']) if i in sensors]
+                    tmp_setup['devices'][device] = dict(zip(names, sensors))
 
-        tmp_daq['sampling_rate'] = int(self.daq_widgets['srate_combo'].currentText())
+                elif device == 'adc':
+                    tmp_setup['devices'][device] = {}
+                    tmp_setup['devices'][device]['channels'] = [e.text() for e in self.server_setup.setup_widgets[server]['adc']['channel_edits'] if e.text()]
+                    tmp_setup['devices'][device]['types'] = [c.currentText() for i, c in enumerate(self.server_setup.setup_widgets[server]['adc']['type_combos'])
+                                                             if self.server_setup.setup_widgets[server]['adc']['channel_edits'][i].text()]
+                    tmp_setup['devices'][device]['ch_numbers'] = [i if self.server_setup.setup_widgets[server]['adc']['ref_combos'][i].currentText() == 'GND'
+                                                                  else (i, -1 + int(self.server_setup.setup_widgets[server]['adc']['ref_combos'][i].currentText()))
+                                                                  for i, w in enumerate(self.server_setup.setup_widgets[server]['adc']['channel_edits']) if w.text()]
+                    tmp_setup['devices'][device]['ro_scales'] = [ro_scales[c.currentText()] for i, c in enumerate(self.server_setup.setup_widgets[server]['adc']['scale_combos'])
+                                                                 if self.server_setup.setup_widgets[server]['adc']['channel_edits'][i].text()]
+                    tmp_setup['devices'][device]['sampling_rate'] = int(self.server_setup.setup_widgets[server]['adc']['srate_combo'].currentText())
 
-        tmp_daq['ro_scale'] = ro_scales[self.daq_widgets['scale_combo'].currentText()]
+                    # DAQ
+                    tmp_setup['devices']['daq'] = {}
+                    tmp_setup['devices']['daq']['sem'] = self.server_setup.setup_widgets[server]['daq']['sem_combo'].currentText()
+                    tmp_setup['devices']['daq']['lambda'] = float(self.server_setup.setup_widgets[server]['daq']['prop_combo'].currentText().split()[0])
+                    tmp_setup['devices']['daq']['kappa'] = float(self.server_setup.setup_widgets[server]['daq']['kappa_combo'].currentText().split()[0])
 
-        tmp_daq['prop_constant'] = float(self.daq_widgets['prop_combo'].currentText().split()[0])
-
-        tmp_daq['hardness_factor'] = float(self.daq_widgets['kappa_combo'].currentText().split()[0])
-
-        self.setup['daq'][self.daq_widgets['name_combo'].currentText()] = tmp_daq
+            # Add
+            self.setup['server'][server] = tmp_setup
 
     def set_read_only(self, read_only=True):
 
         # Disable/enable main widgets to set to read_only
-        self.left_widget.setEnabled(not read_only)
-        self.right_widget.setEnabled(not read_only)
+        self.irrad_setup.setEnabled(not read_only)
+        self.server_setup.setEnabled(not read_only)
         self.btn_ok.setEnabled(not read_only)
 
 
@@ -213,6 +230,7 @@ class IrradSetupWidget(QtWidgets.QWidget):
         self.isSetup = False
 
         self._init_setup()
+        self._connect_to_validation()
 
     def _init_setup(self):
 
@@ -223,10 +241,10 @@ class IrradSetupWidget(QtWidgets.QWidget):
         network_setup.serverIPsFound.connect(lambda ips: server_selection.add_selection(ips))
         network_setup.serverIPsFound.connect(
             lambda ips:
-            server_selection.widgets[ips[0]].isChecked() if server_ips['default'] not in ips else server_selection.widgets[server_ips['default']].setChecked(1)
+            server_selection.widgets[ips[0]].setChecked(1)
+            if (server_ips['default'] not in ips or len(ips) == 1)
+            else server_selection.widgets[server_ips['default']].setChecked(1)
         )
-
-        server_selection.serverSelection.connect(self._validate_setup)
 
         self.layout().addWidget(session_setup)
         self.layout().addWidget(network_setup)
@@ -239,8 +257,14 @@ class IrradSetupWidget(QtWidgets.QWidget):
     def _validate_setup(self):
 
         try:
+            if self.setup_widgets['network'].widgets['host_edit'].isVisible() and not self.setup_widgets['network'].widgets['host_edit'].text():
+                logging.warning("Host IP could not be read. Please enter")
+                self.isSetup = False
+                return
 
+            # Server selection check
             if not any(chbx.isChecked() for chbx in self.setup_widgets['selection'].widgets.values()):
+                logging.warning('No server selected. Please select a server by checking the box. If no server is shown, add a server.')
                 self.isSetup = False
                 return
 
@@ -248,6 +272,14 @@ class IrradSetupWidget(QtWidgets.QWidget):
         finally:
             self.setupValid.emit(self.isSetup)
 
+    def _connect_to_validation(self):
+        """Connect all input widgets to check the input each time an input is edited"""
+
+        # Connect host edit widget
+        self.setup_widgets['network'].widgets['host_edit'].textChanged.connect(self._validate_setup)
+
+        # Connect server selection widget
+        self.setup_widgets['selection'].serverSelection.connect(self._validate_setup)
 
 
 class SessionSetup(GridContainer):
@@ -257,7 +289,6 @@ class SessionSetup(GridContainer):
 
         # Attributes for paths and files
         self.output_path = os.getcwd()
-        self.outfile = None
 
         self._init_setup()
 
@@ -287,13 +318,15 @@ class SessionSetup(GridContainer):
         # Label and combobox to set logging level
         label_logging = QtWidgets.QLabel('Logging level:')
         combo_logging = QtWidgets.QComboBox()
-        combo_logging.addItems(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'])
-        combo_logging.setCurrentIndex(1)
+        combo_logging.addItems([log_levels[lvl] for lvl in sorted([n_lvl for n_lvl in log_levels if isinstance(n_lvl, int)])])
+        combo_logging.setCurrentIndex(combo_logging.findText('INFO'))
 
         # Add to layout
         self.add_widget(widget=[label_logging, combo_logging])
 
         self.widgets['logging_combo'] = combo_logging
+        self.widgets['folder_edit'] = edit_folder
+        self.widgets['outfile_edit'] = edit_out_file
 
     def _get_output_folder(self):
         """Opens a QFileDialog to select/create an output folder"""
@@ -344,24 +377,17 @@ class NetworkSetup(GridContainer):
         label_add_server = QtWidgets.QLabel('Add server IP:')
         edit_server = QtWidgets.QLineEdit()
         edit_server.setInputMask("000.000.000.000;_")
-        edit_server.textEdited.connect(lambda text: btn_add_server.setEnabled(text not in server_ips['all']))
-        edit_server.textEdited.connect(
-            lambda text: btn_add_server.setToolTip(
-                "IP already in list of known IPs" if text not in server_ips['all'] else "Add IP to list of known servers"))
+        edit_server.textEdited.connect(lambda text: btn_add_server.setEnabled(text != '...' and text not in server_ips['all']))
+        edit_server.textEdited.connect(lambda text: btn_add_server.setToolTip(
+            "IP already in list of known server IPs" if text in server_ips['all'] else "Add IP to list of known servers"))
         btn_add_server = QtWidgets.QPushButton('Add')
         btn_add_server.clicked.connect(lambda _: self._add_to_known_servers(ip=edit_server.text()))
         btn_add_server.clicked.connect(lambda _: self.find_servers())
         btn_add_server.clicked.connect(lambda _: btn_add_server.setEnabled(False))
+        btn_add_server.setEnabled(False)
 
         # Add to layout
         self.add_widget(widget=[label_add_server, edit_server, btn_add_server])
-
-        # ZMQ related label and button; shows sub window for zmq setup since it generally doesn't need to be changed
-        label_zmq = QtWidgets.QLabel('%sMQ setup' % u'\u00d8')
-        btn_zmq = QtWidgets.QPushButton('Open %sMQ settings...' % u'\u00d8')
-        btn_zmq.clicked.connect(lambda _: self.zmq_win.show())
-
-        self.add_widget(widget=[label_zmq, btn_zmq])
 
         self.label_status = QtWidgets.QLabel("Status")
         self.serverIPsFound.connect(lambda ips: self.label_status.setText("{} of {} known servers found.".format(len(ips), len(server_ips['all']))))
@@ -369,8 +395,8 @@ class NetworkSetup(GridContainer):
         # Add to layout
         self.add_widget(widget=self.label_status)
 
-
         self.widgets['host_edit'] = edit_host
+        self.widgets['server_edit'] = edit_server
 
     def _add_to_known_servers(self, ip):
         """Add IP address *ip* to irrad_control.server_ips. Sets default IP if wanted"""
@@ -430,15 +456,15 @@ class ServerSelection(GridContainer):
             chbx = QtWidgets.QCheckBox(str(ip))
             edit = QtWidgets.QLineEdit()
             edit.setPlaceholderText('Server {}'.format(i + 1))
-            edit.placeholderText()
 
             # Connect
             chbx.stateChanged.connect(lambda state, e=edit, c=chbx: self.serverSelection.emit({'select': bool(state),
                                                                                                'ip': c.text(),
-                                                                                               'name': e.placeholderText() if not e.text() else e.text()}))
+                                                                                               'name': e.text() or e.placeholderText()}))
             edit.textChanged.connect(lambda text, e=edit, c=chbx: self.serverSelection.emit({'select': c.isChecked(),
                                                                                              'ip': c.text(),
-                                                                                             'name': e.placeholderText() if not text else text}) if c.isChecked() else e.setText(e.text()))
+                                                                                             'name': e.text() or e.placeholderText()})
+                                     if c.isChecked() else e.placeholderText())  # Do dummy action to make lambda possible
 
             self.widgets[ip] = chbx
 
@@ -481,9 +507,6 @@ class ServerSetupWidget(QtWidgets.QWidget):
 
         # If this server is not already in setup
         if ip not in self.server_ips:
-            # Store server name and ip
-            self.server_ips[ip] = current_server
-
             # Setup
             self._init_setup(ip, current_server)
             self._connect_to_validation(ip)
@@ -492,10 +515,13 @@ class ServerSetupWidget(QtWidgets.QWidget):
         else:
             self.tabs.setTabText(self.tabs.indexOf(self.tab_widgets[ip]), current_server)
 
+        # Store/rename server name and ip
+        self.server_ips[ip] = current_server
+
     def remove_server(self, ip):
 
         if ip not in self.tab_widgets:
-            logging.warning("Sever {} not in setup and therefore cannot be removed.".format(ip))
+            logging.warning("Server {} not in setup and therefore cannot be removed.".format(ip))
             return
 
         self.tabs.removeTab(self.tabs.indexOf(self.tab_widgets[ip]))
