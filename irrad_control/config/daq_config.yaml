@@ -1,0 +1,58 @@
+### This config file contains all information relevant to data acquisition (DAQ) ###
+
+# Configuration of available DAQ devices aka secondary electron monitors (SEM)
+sem:
+  default: SEM-39-deg
+  all:
+    - SEM-39-deg
+
+# Descriptor of hardware-related output behind digitized voltage signal or channel
+adc_channels:
+  - sem_left
+  - sem_right
+  - sem_up
+  - sem_down
+  - sem_sum
+  - sem_h_shift
+  - sem_v_shift
+  - cup_integrated
+  - none
+
+# Proportionality constant(s) of the SEMs for online measurements of the HISKP proton beam current.
+# The beam current I_Beam is calculated by the SEM sum signal U_SEM in [V], the 5V full-scale scale I_fs
+# of the custom readout electronics (3.3,10,33,100,330,1000) in [nA] and the proportionality constant lambda in [1/V] like:
+# I_Beam(U_SEM) = lambda * I_fs * U_SEM
+lambda:
+  default: lambda_3
+  all:
+    lambda_1:
+      nominal: 770.97e-3
+      sigma: 4.93e-3
+      hv_sem: 70 V
+      unit: 1/V
+      device: SEM-39-deg
+      ascitime: Thu Jan 23 00:00:00 2019
+    lambda_2:
+      nominal: 837.70e-3
+      sigma: 2.267e-4
+      hv_sem: 100 V
+      unit: 1/V
+      device: SEM-39-deg
+      ascitime: Tue Feb 5 14:50:03 2019
+    lambda_3:
+      nominal: 850.50e-3
+      sigma: 3.634e-4
+      hv_sem: 100 V
+      unit: 1/V
+      device: SEM-39-deg
+      ascitime: Thu Aug 8 14:00:00 2019
+
+# Proton hardness factors
+kappa:
+  default: kappa_1
+  all:
+    kappa_1:
+      nominal: 3.0
+      sigma: 0
+      energy: 12.26
+      ascitime: Thu Jan 23 00:00:00 2019
