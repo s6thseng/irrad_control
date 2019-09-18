@@ -155,6 +155,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
             if name == 'Setup':
                 self.setup_tab = IrradSetupTab(parent=self)
+                self.setup_tab.irrad_setup.setup_widgets['session'].widgets['logging_combo'].currentTextChanged.connect(lambda lvl: self.log_widget.change_level(lvl))
                 self.setup_tab.setupCompleted.connect(lambda setup: self._init_setup(setup))
                 tw[name] = self.setup_tab
             else:
@@ -164,7 +165,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
             self.tabs.setTabEnabled(self.tabs.indexOf(tw[name]), name in ['Setup'])
 
     def _init_setup(self, setup):
-
+        return
         self.daq_started = True
 
         # Store setup
