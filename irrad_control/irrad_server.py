@@ -5,10 +5,11 @@ import multiprocessing
 import threading
 import logging
 from zmq.log import handlers
-from adc.ADS1256_definitions import *
-from adc.ADS1256_drates import ads1256_drates
-from adc.pipyadc import ADS1256
-from xystage import ZaberXYStage
+from irrad_control.devices.adc.ADS1256_definitions import *
+from irrad_control.devices.adc.ADS1256_drates import ads1256_drates
+from irrad_control.devices.adc.pipyadc import ADS1256
+from irrad_control.devices.stage.xystage import ZaberXYStage
+from irrad_control.devices.temp.arduino_temp_sens import ArduinoTempSens
 
 
 class IrradServer(multiprocessing.Process):
@@ -19,6 +20,7 @@ class IrradServer(multiprocessing.Process):
 
         # Attributes for internal handling of sending data, receiving and commands
         self.stop_send_data = threading.Event()
+        self.stop_send_temp = threading.Event()
         self.stop_recv_cmds = multiprocessing.Event()
         self._busy_cmd = False
 
@@ -31,13 +33,15 @@ class IrradServer(multiprocessing.Process):
 
         # Dict of known commands
         self.commands = {'adc': [],
+                         'temp': [],
                          'server': ['start', 'shutdown'],
                          'stage': ['move_rel', 'move_abs', 'prepare', 'scan', 'finish', 'stop', 'pos', 'home',
                                    'set_speed', 'get_speed', 'no_beam']
                          }
 
         # Attribute to store setup in
-        self.irrad_setup = None
+        self.setup = None
+        self.server = None
 
     def _tcp_addr(self, port, ip='*'):
         """Creates string of complete tcp address which sockets can bind to"""
@@ -47,9 +51,9 @@ class IrradServer(multiprocessing.Process):
         """Setup logging"""
 
         # Numeric logging level
-        numeric_level = getattr(logging, self.irrad_setup['session']['loglevel'].upper(), None)
+        numeric_level = getattr(logging, self.setup['session']['loglevel'].upper(), None)
         if not isinstance(numeric_level, int):
-            raise ValueError('Invalid log level: {}'.format(self.irrad_setup['session']['loglevel']))
+            raise ValueError('Invalid log level: {}'.format(self.setup['session']['loglevel']))
 
         # Set level
         logging.getLogger().setLevel(level=numeric_level)
@@ -72,7 +76,7 @@ class IrradServer(multiprocessing.Process):
         self.adc = ADS1256()
 
         # Set initial data rate from DAQ setup
-        self.adc.drate = ads1256_drates[self.daq_setup['sampling_rate']]
+        self.adc.drate = ads1256_drates[self.adc_setup['sampling_rate']]
 
         # Calibrate the ADC before DAQ
         self.adc.cal_self()
@@ -83,7 +87,7 @@ class IrradServer(multiprocessing.Process):
         self.adc_channels = []
 
         # Assign the physical channel numbers e.g. multiplexer address
-        for ch in self.daq_setup['ch_numbers']:
+        for ch in self.adc_setup['ch_numbers']:
             # Single-ended versus common ground self._gnd
             if isinstance(ch, int):
                 tmp_ch = self._pos_channels[ch] | self._gnd
@@ -94,29 +98,60 @@ class IrradServer(multiprocessing.Process):
             # Add to channels
             self.adc_channels.append(tmp_ch)
 
-    def _start_server(self, irrad_setup):
+    def _start_server(self, start_setup):
         """Sets up the server process"""
 
         # Update setup
-        self.irrad_setup = irrad_setup
+        self.server = start_setup['server']
+        self.setup = start_setup['setup']
 
-        # Extract info and sub setups
-        self.adc_name = irrad_setup['daq'].keys()[0]
-        self.daq_setup = irrad_setup['daq'][self.adc_name]
-        self.tcp_setup = irrad_setup['tcp']
+        # Overwrite server setup with our server
+        self.setup['server'] = self.setup['server'][self.server]
 
         # Setup logging
         self._setup_logging()
 
-        # Setup adc
-        self._setup_adc()
+        # If this server has an ADC, setup and start sending data
+        if 'adc' in self.setup['server']['devices']:
 
-        # Start data sending thread
-        data_thread = threading.Thread(target=self.send_data)
-        data_thread.start()
+            self.adc_setup = self.setup['server']['devices']['adc']
 
-        # Init stage
-        self.xy_stage = ZaberXYStage()
+            # Setup adc
+            self._setup_adc()
+
+            # Start data sending thread
+            data_thread = threading.Thread(target=self.send_data)
+            data_thread.start()
+
+        # Otherwise remove from command list
+        else:
+            del self.commands['adc']
+
+        # If this server has temp sensor
+        if 'temp' in self.setup['server']['devices']:
+
+            self.temp_setup = self.setup['server']['devices']['temp']
+
+            # Init temp sens
+            self.temp_sens = ArduinoTempSens(port="/dev/ttyUSB1")  #TODO: pass port as arg in device setup
+
+            # Start data sending thread
+            temp_thread = threading.Thread(target=self.send_temp)
+            temp_thread.start()
+
+        # Otherwise remove from command list
+        else:
+            del self.commands['temp']
+
+        # If this server has stage
+        if 'stage' in self.setup['server']['devices']:
+
+            # Init stage
+            self.xy_stage = ZaberXYStage(serial_port='/dev/ttyUSB0') #TODO: pass port as arg in device setup
+
+        # Otherwise remove from command list
+        else:
+            del self.commands['stage']
 
     def send_data(self):
         """Sends data from dedicated thread"""
@@ -124,7 +159,7 @@ class IrradServer(multiprocessing.Process):
         # Needs to be specified within this func since its run on dedicated thread
         data_pub = self.context.socket(zmq.PUB)
         data_pub.set_hwm(10)  # drop data if too slow
-        data_pub.bind(self._tcp_addr(self.tcp_setup['port']['data']))
+        data_pub.bind(self._tcp_addr(self.setup['port']['data']))
 
         # Send data als long as specified
         while not self.stop_send_data.is_set():
@@ -132,12 +167,32 @@ class IrradServer(multiprocessing.Process):
             raw_data = self.adc.read_sequence(self.adc_channels)
 
             # Add meta data
-            _meta = {'timestamp': time.time(), 'name': self.adc_name, 'type': 'raw'}
-            _data = dict(
-                [(self.daq_setup['channels'][i], raw_data[i] * self.adc.v_per_digit) for i in range(len(raw_data))])
+            _meta = {'timestamp': time.time(), 'name': self.server, 'type': 'raw'}
+            _data = dict([(self.adc_setup['channels'][i], raw_data[i] * self.adc.v_per_digit) for i in range(len(raw_data))])
 
             # Send
             data_pub.send_json({'meta': _meta, 'data': _data})
+
+    def send_temp(self):
+        """Sends temp data from dedicated thread"""
+
+        # Needs to be specified within this func since its run on dedicated thread
+        temp_pub = self.context.socket(zmq.PUB)
+        temp_pub.set_hwm(10)  # drop data if too slow
+        temp_pub.bind(self._tcp_addr(self.setup['port']['temp']))
+
+        # Send data als long as specified
+        while not self.stop_send_temp.is_set():
+            # Read raw temp data
+            raw_temp = self.temp_sens.get_temp(sorted(self.temp_setup.keys()))
+
+            _data = dict([(self.temp_setup[sens], raw_temp[sens]) for sens in raw_temp])
+
+            # Add meta data
+            _meta = {'timestamp': time.time(), 'name': self.server, 'type': 'temp'}
+
+            # Send
+            temp_pub.send_json({'meta': _meta, 'data': _data})
 
     def _send_reply(self, reply, _type, sender, data=None):
 
@@ -212,6 +267,7 @@ class IrradServer(multiprocessing.Process):
             elif cmd == 'shutdown':
                 self._send_reply(reply='shutdown', _type='STANDARD', sender='server')
                 self.stop_send_data.set()
+                self.stop_send_temp.set()
                 self.stop_recv_cmds.set()
 
         elif target == 'stage':
@@ -251,8 +307,8 @@ class IrradServer(multiprocessing.Process):
                 self._send_reply(reply='set_speed', _type='STANDARD', sender='stage')
 
             elif cmd == 'prepare':
-                self.xy_stage.prepare_scan(tcp_address=self._tcp_addr(port=self.tcp_setup['port']['stage']),
-                                           adc_name=self.adc_name,
+                self.xy_stage.prepare_scan(tcp_address=self._tcp_addr(port=self.setup['port']['stage']),
+                                           server=self.server,
                                            **cmd_data)
                 _data = {'n_rows': self.xy_stage.scan_params['n_rows'], 'rows': self.xy_stage.scan_params['rows']}
 
