@@ -408,7 +408,7 @@ class ZaberXYStage:
 
         self._move_axis_rel(distance, self.x_axis, unit)
 
-    def prepare_scan(self, rel_start_point, rel_end_point, scan_speed, step_size, tcp_address, adc_name):
+    def prepare_scan(self, rel_start_point, rel_end_point, scan_speed, step_size, tcp_address, server):
         """
         Prepares a scan by storing all needed info in self.scan_params
 
@@ -424,8 +424,8 @@ class ZaberXYStage:
             stepp size of vertical steps in mm
         tcp_address : str
             tcp address to which data of stage is published during scan
-        adc_name : str
-            name of DAQ device which is represented by an ADC
+        server : str
+            IP address of server which controls the stage
         """
 
         # Store position which is used as origin of relative coordinate system for scan
@@ -445,7 +445,7 @@ class ZaberXYStage:
         self.scan_params['speed'] = scan_speed
         self.scan_params['step_size'] = step_size
         self.scan_params['tcp_address'] = tcp_address
-        self.scan_params['adc_name'] = adc_name
+        self.scan_params['server'] = server
 
         # Calculate number of rows for the scan
         dy = self.distance_to_steps(step_size, unit='mm')
@@ -475,7 +475,7 @@ class ZaberXYStage:
 
         # Check if scan_params dict contains all necessary info
         scan_reqs = ('origin', 'start_pos', 'end_pos', 'n_rows', 'rows',
-                     'speed', 'step_size', 'tcp_address', 'adc_name')
+                     'speed', 'step_size', 'tcp_address', 'server')
         missed_reqs = [req for req in scan_reqs if req not in scan_params]
 
         # Return if info is missing
@@ -599,7 +599,7 @@ class ZaberXYStage:
             raise UnexpectedReplyError(msg)
 
         # Send start data
-        _meta = {'timestamp': time.time(), 'name': scan_params['adc_name'], 'type': 'stage'}
+        _meta = {'timestamp': time.time(), 'name': scan_params['server'], 'type': 'stage'}
         _data = {'status': 'start', 'scan': scan, 'row': row,
                  'speed': self.get_speed(self.x_axis, unit='mm/s'),
                  'x_start': self.x_axis.get_position() * self.microstep,
@@ -617,7 +617,7 @@ class ZaberXYStage:
             raise UnexpectedReplyError(msg)
 
         # Send stop data
-        _meta = {'timestamp': time.time(), 'name': scan_params['adc_name'], 'type': 'stage'}
+        _meta = {'timestamp': time.time(), 'name': scan_params['server'], 'type': 'stage'}
         _data = {'status': 'stop',
                  'x_stop': self.x_axis.get_position() * self.microstep,
                  'y_stop': self.y_axis.get_position() * self.microstep}
@@ -656,7 +656,7 @@ class ZaberXYStage:
         self.set_speed(scan_params['speed'], self.x_axis, unit='mm/s')
 
         # Initialize scan
-        _meta = {'timestamp': time.time(), 'name': scan_params['adc_name'], 'type': 'stage'}
+        _meta = {'timestamp': time.time(), 'name': scan_params['server'], 'type': 'stage'}
         _data = {'status': 'init', 'y_step': scan_params['step_size'], 'n_rows': scan_params['n_rows']}
 
         # Send init data
@@ -707,7 +707,7 @@ class ZaberXYStage:
         finally:
 
             # Send finished data
-            _meta = {'timestamp': time.time(), 'name': scan_params['adc_name'], 'type': 'stage'}
+            _meta = {'timestamp': time.time(), 'name': scan_params['server'], 'type': 'stage'}
             _data = {'status': 'finished'}
 
             # Publish data
