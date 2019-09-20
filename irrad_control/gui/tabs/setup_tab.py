@@ -556,7 +556,7 @@ class ServerSetupWidget(QtWidgets.QWidget):
         device_setup.widgets['temp'].stateChanged.connect(lambda state: temp_setup.setVisible(state))
 
         # If we are the first server, control stage
-        device_setup.widgets['stage'].setChecked(len(self.server_ips) == 1)
+        device_setup.widgets['stage'].setChecked(not self.server_ips)
         device_setup.widgets['adc'].setChecked(True)
         device_setup.widgets['temp'].setChecked(True)
 
