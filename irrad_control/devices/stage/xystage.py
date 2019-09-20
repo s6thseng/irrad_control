@@ -64,9 +64,9 @@ class ZaberXYStage:
         self.speed_units = OrderedDict([('mm/s', 1.0), ('cm/s', 1e1), ('m/s', 1e3)])
         self.accel_units = OrderedDict([('mm/s2', 1.0), ('cm/s2', 1e1), ('m/s2', 1e3)])
 
-        # Set speeds on both axis to reasonable values: 40 mm / s
-        self.set_speed(40, self.x_axis, unit='mm/s')
-        self.set_speed(40, self.y_axis, unit='mm/s')
+        # Set speeds on both axis to reasonable values: 10 mm / s
+        self.set_speed(10, self.x_axis, unit='mm/s')
+        self.set_speed(10, self.y_axis, unit='mm/s')
 
     def _check_reply(self, reply):
         """Method to check the reply of a command which has been issued to one of the axes"""
@@ -714,8 +714,8 @@ class ZaberXYStage:
             stage_pub.send_json({'meta': _meta, 'data': _data})
 
             # Reset speeds
-            self.set_speed(40, self.x_axis, unit='mm/s')
-            self.set_speed(40, self.y_axis, unit='mm/s')
+            self.set_speed(10, self.x_axis, unit='mm/s')
+            self.set_speed(10, self.y_axis, unit='mm/s')
 
             # Move back to origin; move y first in order to not scan over device
             self.y_axis.move_abs(scan_params['origin'][1])
