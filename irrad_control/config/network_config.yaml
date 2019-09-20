@@ -1,16 +1,11 @@
-### Configuration of network-related options ###
-
-# List of all known server IP addresses; key / value pair with IP as key and optional string as server name / description
+ports:
+  cmd: 8502
+  data: 8501
+  log: 8500
+  stage: 8503
+  temp: 8504
 server:
-  default: 131.220.221.84
   all:
     131.220.162.129: none
     131.220.221.84: none
-
-# Ports to be used for inter-process communication via ZMQ
-ports:
-  log: 8500
-  data: 8501
-  cmd: 8502
-  stage: 8503
-  temp: 8504
+  default: 131.220.221.84

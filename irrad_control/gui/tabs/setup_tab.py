@@ -4,11 +4,14 @@ import time
 import logging
 import subprocess
 from PyQt5 import QtWidgets, QtCore
-from irrad_control import roe_output, ro_scales, ads1256
-from irrad_control import proportionality_constants, server_ips, hardness_factors, config_path, daq_devices
-from irrad_control.gui.widgets import ZmqSetupWindow
+from irrad_control import network_config, daq_config, config_path
+from irrad_control.devices.adc import ads1256
 from irrad_control.utils import Worker, log_levels
 from irrad_control.gui.widgets import GridContainer
+from collections import OrderedDict
+
+_ro_scales = OrderedDict([('1 %sA' % u'\u03bc', 1000.0), ('0.33 %sA' % u'\u03bc', 330.0),
+                          ('0.1 %sA' % u'\u03bc', 100.0), ('33 nA', 33.0), ('10 nA', 10.0), ('3.3 nA', 3.3)])
 
 
 def _fill_combobox_items(cbx, fill_dict):
@@ -139,6 +142,10 @@ class IrradSetupTab(QtWidgets.QWidget):
         with open(self.setup['session']['outfile'] + '.yaml', 'w') as _setup:
             yaml.safe_dump(self.setup, _setup, default_flow_style=False)
 
+        # Open the network_config.yaml and overwrites it with current server_ips
+        with open(os.path.join(config_path, 'network_config.yaml'), 'w') as nc:
+            yaml.safe_dump(network_config, nc, default_flow_style=False)
+
     def update_setup(self):
         """Update the info into the setup dict"""
 
@@ -152,7 +159,7 @@ class IrradSetupTab(QtWidgets.QWidget):
 
         # Network
         self.setup['host'] = self.irrad_setup.setup_widgets['network'].widgets['host_edit'].text()
-        self.setup['port'] = dict(self.irrad_setup.setup_widgets['network'].zmq_win.ports)
+        self.setup['port'] = network_config['ports']
 
         # Server
         self.setup['server'] = {}
@@ -164,6 +171,7 @@ class IrradSetupTab(QtWidgets.QWidget):
 
             # Name
             tmp_setup['name'] = self.server_setup.server_ips[server]
+            network_config['server']['all'][server] = tmp_setup['name']
 
             # Devices
             tmp_setup['devices'] = {}
@@ -189,7 +197,7 @@ class IrradSetupTab(QtWidgets.QWidget):
                     tmp_setup['devices'][device]['ch_numbers'] = [i if self.server_setup.setup_widgets[server]['adc']['ref_combos'][i].currentText() == 'GND'
                                                                   else (i, -1 + int(self.server_setup.setup_widgets[server]['adc']['ref_combos'][i].currentText()))
                                                                   for i, w in enumerate(self.server_setup.setup_widgets[server]['adc']['channel_edits']) if w.text()]
-                    tmp_setup['devices'][device]['ro_scales'] = [ro_scales[c.currentText()] for i, c in enumerate(self.server_setup.setup_widgets[server]['adc']['scale_combos'])
+                    tmp_setup['devices'][device]['ro_scales'] = [_ro_scales[c.currentText()] for i, c in enumerate(self.server_setup.setup_widgets[server]['adc']['scale_combos'])
                                                                  if self.server_setup.setup_widgets[server]['adc']['channel_edits'][i].text()]
                     tmp_setup['devices'][device]['sampling_rate'] = int(self.server_setup.setup_widgets[server]['adc']['srate_combo'].currentText())
 
@@ -242,8 +250,8 @@ class IrradSetupWidget(QtWidgets.QWidget):
         network_setup.serverIPsFound.connect(
             lambda ips:
             server_selection.widgets[ips[0]].setChecked(1)
-            if (server_ips['default'] not in ips or len(ips) == 1)
-            else server_selection.widgets[server_ips['default']].setChecked(1)
+            if (network_config['server']['default'] not in ips or len(ips) == 1)
+            else server_selection.widgets[network_config['server']['default']].setChecked(1)
         )
 
         self.layout().addWidget(session_setup)
@@ -350,7 +358,6 @@ class NetworkSetup(GridContainer):
         self.threadpool = QtCore.QThreadPool()
         self.available_servers = []
         self.selected_servers = []
-        self.zmq_win = ZmqSetupWindow()
 
         self._init_setup()
         self.find_servers()
@@ -377,9 +384,9 @@ class NetworkSetup(GridContainer):
         label_add_server = QtWidgets.QLabel('Add server IP:')
         edit_server = QtWidgets.QLineEdit()
         edit_server.setInputMask("000.000.000.000;_")
-        edit_server.textEdited.connect(lambda text: btn_add_server.setEnabled(text != '...' and text not in server_ips['all']))
+        edit_server.textEdited.connect(lambda text: btn_add_server.setEnabled(text != '...' and text not in network_config['server']['all']))
         edit_server.textEdited.connect(lambda text: btn_add_server.setToolTip(
-            "IP already in list of known server IPs" if text in server_ips['all'] else "Add IP to list of known servers"))
+            "IP already in list of known server IPs" if text in network_config['server']['all'] else "Add IP to list of known servers"))
         btn_add_server = QtWidgets.QPushButton('Add')
         btn_add_server.clicked.connect(lambda _: self._add_to_known_servers(ip=edit_server.text()))
         btn_add_server.clicked.connect(lambda _: self.find_servers())
@@ -390,7 +397,7 @@ class NetworkSetup(GridContainer):
         self.add_widget(widget=[label_add_server, edit_server, btn_add_server])
 
         self.label_status = QtWidgets.QLabel("Status")
-        self.serverIPsFound.connect(lambda ips: self.label_status.setText("{} of {} known servers found.".format(len(ips), len(server_ips['all']))))
+        self.serverIPsFound.connect(lambda ips: self.label_status.setText("{} of {} known servers found.".format(len(ips), len(network_config['server']['all']))))
 
         # Add to layout
         self.add_widget(widget=self.label_status)
@@ -405,13 +412,13 @@ class NetworkSetup(GridContainer):
         reply = QtWidgets.QMessageBox.question(self, 'Add server IP', msg, QtWidgets.QMessageBox.Yes, QtWidgets.QMessageBox.No)
 
         if reply == QtWidgets.QMessageBox.Yes:
-            server_ips['default'] = ip
+            network_config['server']['default'] = ip
 
-        server_ips['all'].append(ip)
+        network_config['server']['all'][ip] = 'none'
 
-        # Open the server_ips.yaml and overwrites it with current server_ips
-        with open(os.path.join(config_path, 'server_ips.yaml'), 'w') as si:
-            yaml.safe_dump(server_ips, si, default_flow_style=False)
+        # Open the network_config.yaml and overwrites it with current server_ips
+        with open(os.path.join(config_path, 'network_config.yaml'), 'w') as si:
+            yaml.safe_dump(network_config, si, default_flow_style=False)
 
     def find_servers(self):
 
@@ -420,11 +427,11 @@ class NetworkSetup(GridContainer):
 
     def _find_available_servers(self, timeout=10):
 
-        n_available = len(server_ips['all'])
+        n_available = len(network_config['server']['all'])
         start = time.time()
         while len(self.available_servers) != n_available and time.time() - start < timeout:
 
-            for ip in server_ips['all']:
+            for ip in network_config['server']['all']:
                 # If we already have found this server in the network, continue
                 if ip in self.available_servers:
                     continue
@@ -455,7 +462,8 @@ class ServerSelection(GridContainer):
 
             chbx = QtWidgets.QCheckBox(str(ip))
             edit = QtWidgets.QLineEdit()
-            edit.setPlaceholderText('Server {}'.format(i + 1))
+            default = 'Server {}'.format(i + 1)
+            edit.setPlaceholderText(default if ip not in network_config['server']['all'] else network_config['server']['all'][ip] if network_config['server']['all'][ip] != 'none' else default)
 
             # Connect
             chbx.stateChanged.connect(lambda state, e=edit, c=chbx: self.serverSelection.emit({'select': bool(state),
@@ -716,8 +724,8 @@ class DAQSetup(GridContainer):
         label_sem = QtWidgets.QLabel('SEM name:')
         label_sem.setToolTip('Name of DAQ SEM e.g. SEM_C')
         combo_sem = QtWidgets.QComboBox()
-        combo_sem.addItems(daq_devices['all'])
-        combo_sem.setCurrentIndex(daq_devices['all'].index(daq_devices['default']))
+        combo_sem.addItems(daq_config['sem']['all'])
+        combo_sem.setCurrentIndex(daq_config['sem']['all'].index(daq_config['sem']['default']))
 
         # Add to layout
         self.add_widget(widget=[label_sem, combo_sem])
@@ -725,7 +733,7 @@ class DAQSetup(GridContainer):
         # Label for readout scale combobox
         label_kappa = QtWidgets.QLabel('Proton hardness factor %s:' % u'\u03ba')
         combo_kappa = QtWidgets.QComboBox()
-        _fill_combobox_items(combo_kappa, hardness_factors)
+        _fill_combobox_items(combo_kappa, daq_config['kappa'])
 
         # Add to layout
         self.add_widget(widget=[label_kappa, combo_kappa])
@@ -734,7 +742,7 @@ class DAQSetup(GridContainer):
         label_prop = QtWidgets.QLabel('Proportionality constant %s [1/V]:' % u'\u03bb')
         label_prop.setToolTip('Constant translating SEM signal to actual proton beam current via I_Beam = %s * I_FS * SEM_%s' % (u'\u03A3', u'\u03bb'))
         combo_prop = QtWidgets.QComboBox()
-        _fill_combobox_items(combo_prop, proportionality_constants)
+        _fill_combobox_items(combo_prop, daq_config['lambda'])
 
         # Add to layout
         self.add_widget(widget=[label_prop, combo_prop])
@@ -772,7 +780,7 @@ class ADCSetup(GridContainer):
         label_scale = QtWidgets.QLabel('R/O electronics scale I_FS:')
         label_scale.setToolTip("Current corresponding to 5V full-scale voltage")
         combo_scale = QtWidgets.QComboBox()
-        combo_scale.addItems(ro_scales.keys())
+        combo_scale.addItems(_ro_scales.keys())
         combo_scale.setCurrentIndex(1)
         checkbox_scale = QtWidgets.QCheckBox('Set scale per channel')  # Allow individual scales per channel
         checkbox_scale.stateChanged.connect(lambda state: combo_scale.setEnabled(not bool(state)))
@@ -809,15 +817,15 @@ class ADCSetup(GridContainer):
 
             # Channel RO scale combobox
             _cbx_scale = QtWidgets.QComboBox()
-            _cbx_scale.addItems(ro_scales.keys())
+            _cbx_scale.addItems(_ro_scales.keys())
             _cbx_scale.setToolTip('Select RO scale for each channel individually.')
             _cbx_scale.setCurrentIndex(combo_scale.currentIndex())
 
             # Channel type combobox
             _cbx_type = QtWidgets.QComboBox()
-            _cbx_type.addItems(roe_output)
+            _cbx_type.addItems(daq_config['adc_channels'])
             _cbx_type.setToolTip('Select type of readout channel. If not None, this info is used for interpretation.')
-            _cbx_type.setCurrentIndex(i if i < len(self.default_channels) else roe_output.index('none'))
+            _cbx_type.setCurrentIndex(i if i < len(self.default_channels) else daq_config['adc_channels'].index('none'))
 
             # Reference channel to measure voltage; can be GND or any of the other channels
             _cbx_ref = QtWidgets.QComboBox()

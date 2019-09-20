@@ -1,5 +1,9 @@
 from PyQt5 import QtWidgets, QtCore, QtGui
-from irrad_control import ads1256, ro_scales
+from irrad_control.devices.adc import ads1256
+from collections import OrderedDict
+
+_ro_scales = OrderedDict([('1 %sA' % u'\u03bc', 1000.0), ('0.33 %sA' % u'\u03bc', 330.0),
+                          ('0.1 %sA' % u'\u03bc', 100.0), ('33 nA', 33.0), ('10 nA', 10.0), ('3.3 nA', 3.3)])
 
 
 class DaqInfoWidget(QtWidgets.QWidget):
@@ -88,7 +92,7 @@ class DaqInfoWidget(QtWidgets.QWidget):
             _cnfg = self.daq_setup[adc]
             _srate_lbl = '' if 'sampling_rate' not in _cnfg else _cnfg['sampling_rate']
             _avgs_lbl = '' if 'sampling_rate' not in _cnfg else ads1256['avgs'][_cnfg['sampling_rate']]
-            _ro_lbl = '' if 'ro_scale' not in _cnfg else ''.join([s for s in ro_scales.keys() if ro_scales[s] == _cnfg['ro_scale']])
+            _ro_lbl = '' if 'ro_scale' not in _cnfg else ''.join([s for s in _ro_scales.keys() if _ro_scales[s] == _cnfg['ro_scale']])
 
             # Set labels
             self.data_rate_labels[adc] = QtWidgets.QLabel('Data rate :' + '\t' + 'Hz ')

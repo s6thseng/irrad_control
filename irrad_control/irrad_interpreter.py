@@ -7,7 +7,7 @@ import yaml
 import numpy as np
 import tables as tb
 from zmq.log import handlers
-from irrad_control import roe_output, xy_stage_stats, config_path
+from irrad_control import daq_config, xy_stage_stats, config_path
 from collections import defaultdict
 
 
@@ -51,7 +51,7 @@ class IrradInterpreter(multiprocessing.Process):
 
         for adc in self.adc_names:
             self.ch_type_idx[adc] = dict([(x, self.daq_setup[adc]['types'].index(x))
-                                          for x in roe_output if x in self.daq_setup[adc]['types']])
+                                          for x in daq_config['adc_channels'] if x in self.daq_setup[adc]['types']])
 
     def _tcp_addr(self, port, ip='*'):
         """Creates string of complete tcp address which sockets can bind to"""
