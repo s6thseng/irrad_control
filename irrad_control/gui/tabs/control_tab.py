@@ -8,7 +8,7 @@ class IrradControlTab(QtWidgets.QWidget):
 
     sendCmd = QtCore.pyqtSignal(dict)
 
-    def __init__(self, irrad_setup, parent=None):
+    def __init__(self, parent=None):
         super(IrradControlTab, self).__init__(parent)
 
         # Layouts; split in quadrants
@@ -49,9 +49,6 @@ class IrradControlTab(QtWidgets.QWidget):
         
         # Add main layout to widget layout and add ok button
         self.setLayout(self.main_layout)
-
-        # General attributes
-        self.setup = irrad_setup
 
         # Attributes for the stage
         self.current_pos = [0.0, 0.0]
