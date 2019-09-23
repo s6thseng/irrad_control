@@ -87,12 +87,11 @@ class ProcessManager(object):
         
         self._exec_cmd(hostname, 'nohup bash /home/{}/start_irrad_server.sh {} &'.format(self.server[hostname], port))
 
-    def start_interpreter_process(self, port):
+    def start_interpreter_process(self, setup_yaml):
 
-        logging.info('Starting interpreter process listening to port {}...'.format(port))
+        logging.info('Starting interpreter process...')
 
-        self.interpreter_proc = self._call_script(script=os.path.join(package_path, 'irrad_interpreter.py'),
-                                                  args=port)
+        self.interpreter_proc = self._call_script(script=os.path.join(package_path, 'irrad_interpreter.py'), args=setup_yaml)
 
     def set_server_pid(self, hostname, pid):
         
