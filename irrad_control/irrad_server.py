@@ -60,7 +60,7 @@ class IrradServer(multiprocessing.Process):
 
         # Publish log
         log_pub = self.context.socket(zmq.PUB)
-        log_pub.bind(self._tcp_addr(self.tcp_setup['port']['log']))
+        log_pub.bind(self._tcp_addr(self.setup['port']['log']))
 
         # Create logging publisher first
         handler = handlers.PUBHandler(log_pub)
