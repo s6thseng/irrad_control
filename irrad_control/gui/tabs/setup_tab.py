@@ -187,7 +187,7 @@ class IrradSetupTab(QtWidgets.QWidget):
                     temp_chbxs = self.server_setup.setup_widgets[server]['temp']['temp_chbxs']
                     sensors = [i for i in range(len(temp_chbxs)) if temp_chbxs[i].isChecked()]
                     names = [e.text() or e.placeholderText() for i, e in enumerate(self.server_setup.setup_widgets[server]['temp']['temp_edits']) if i in sensors]
-                    tmp_setup['devices'][device] = dict(zip(names, sensors))
+                    tmp_setup['devices'][device] = dict(zip(sensors, names))
 
                 elif device == 'adc':
                     tmp_setup['devices'][device] = {}
