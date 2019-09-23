@@ -6,12 +6,12 @@ from irrad_control.gui.widgets import RawDataPlot, BeamPositionPlot, PlotWrapper
 class IrradMonitorTab(QtWidgets.QWidget):
     """Widget which implements a data monitor"""
 
-    def __init__(self, daq_setup, parent=None):
+    def __init__(self, setup, parent=None):
         super(IrradMonitorTab, self).__init__(parent)
 
-        self.daq_setup = daq_setup
+        self.setup = setup
 
-        self.monitors = ('raw', 'beam', 'fluence')
+        self.monitors = ('raw', 'beam', 'fluence', 'temp')
 
         self.daq_tabs = QtWidgets.QTabWidget()
         self.monitor_tabs = {}
@@ -25,52 +25,50 @@ class IrradMonitorTab(QtWidgets.QWidget):
 
     def _init_tabs(self):
 
-        for adc in self.daq_setup:
+        for server in self.setup:
 
-            self.plots[adc] = OrderedDict()
+            self.plots[server] = OrderedDict()
 
-            # Tabs per adc/daq device
-            self.monitor_tabs[adc] = QtWidgets.QTabWidget()
+            # Tabs per server
+            self.monitor_tabs[server] = QtWidgets.QTabWidget()
 
             for monitor in self.monitors:
 
-                if monitor == 'fluence':
-                    continue
+                monitor_widget = None
 
-                if monitor == 'raw':
+                if 'adc' in self.setup[server]['devices']:
 
-                    self.plots[adc]['raw_plot'] = RawDataPlot(self.daq_setup[adc], daq_device=adc)
+                    if monitor == 'raw':
 
-                    monitor_widget = PlotWrapperWidget(self.plots[adc]['raw_plot'])
+                        self.plots[server]['raw_plot'] = RawDataPlot(self.setup[server], daq_device=self.setup[server]['daq']['sem'])
 
-                elif monitor == 'beam':
+                        monitor_widget = PlotWrapperWidget(self.plots[server]['raw_plot'])
 
-                    monitor_widget = QtWidgets.QSplitter()
-                    monitor_widget.setOrientation(QtCore.Qt.Horizontal)
-                    monitor_widget.setChildrenCollapsible(False)
+                    elif monitor == 'beam':
 
-                    self.plots[adc]['current_plot'] = BeamCurrentPlot(daq_device=adc)
-                    self.plots[adc]['pos_plot'] = BeamPositionPlot(self.daq_setup[adc], daq_device=adc)
+                        monitor_widget = QtWidgets.QSplitter()
+                        monitor_widget.setOrientation(QtCore.Qt.Horizontal)
+                        monitor_widget.setChildrenCollapsible(False)
 
-                    beam_current_wrapper = PlotWrapperWidget(self.plots[adc]['current_plot'])
-                    beam_pos_wrapper = PlotWrapperWidget(self.plots[adc]['pos_plot'])
+                        self.plots[server]['current_plot'] = BeamCurrentPlot(daq_device=self.setup[server]['daq']['sem'])
+                        self.plots[server]['pos_plot'] = BeamPositionPlot(self.setup[server], daq_device=self.setup[server]['daq']['sem'])
 
-                    monitor_widget.addWidget(beam_current_wrapper)
-                    monitor_widget.addWidget(beam_pos_wrapper)
+                        beam_current_wrapper = PlotWrapperWidget(self.plots[server]['current_plot'])
+                        beam_pos_wrapper = PlotWrapperWidget(self.plots[server]['pos_plot'])
 
-                #elif monitor == 'fluence':
-                #    self.plots[adc]['fluence_plot'] = FluenceHist(irrad_setup={'n_rows': 50, 'kappa': 3})
-                #    monitor_widget = PlotWrapperWidget(self.plots[adc]['fluence_plot'])
+                        monitor_widget.addWidget(beam_current_wrapper)
+                        monitor_widget.addWidget(beam_pos_wrapper)
 
-                self.monitor_tabs[adc].addTab(monitor_widget, monitor.capitalize())
+                if monitor_widget is not None:
+                    self.monitor_tabs[server].addTab(monitor_widget, monitor.capitalize())
 
-            self.daq_tabs.addTab(self.monitor_tabs[adc], adc)
+            self.daq_tabs.addTab(self.monitor_tabs[server], self.setup[server]['name'])
 
     def add_fluence_hist(self, n_rows, kappa):
 
-        for adc in self.daq_setup:
+        for server in self.setup:
 
-            self.plots[adc]['fluence_plot'] = FluenceHist(irrad_setup={'n_rows': n_rows, 'kappa': kappa})
-            monitor_widget = PlotWrapperWidget(self.plots[adc]['fluence_plot'])
-            self.monitor_tabs[adc].addTab(monitor_widget, 'Fluence')
+            self.plots[server]['fluence_plot'] = FluenceHist(irrad_setup={'n_rows': n_rows, 'kappa': kappa})
+            monitor_widget = PlotWrapperWidget(self.plots[server]['fluence_plot'])
+            self.monitor_tabs[server].addTab(monitor_widget, 'Fluence')
 
