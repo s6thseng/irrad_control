@@ -249,9 +249,9 @@ class IrradSetupWidget(QtWidgets.QWidget):
         network_setup.serverIPsFound.connect(lambda ips: server_selection.add_selection(ips))
         network_setup.serverIPsFound.connect(
             lambda ips:
-            server_selection.widgets[ips[0]].setChecked(1)
+            server_selection.widgets[ips[0]]['checkbox'].setChecked(1)
             if (network_config['server']['default'] not in ips or len(ips) == 1)
-            else server_selection.widgets[network_config['server']['default']].setChecked(1)
+            else server_selection.widgets[network_config['server']['default']]['checkbox'].setChecked(1)
         )
 
         self.layout().addWidget(session_setup)
@@ -271,8 +271,15 @@ class IrradSetupWidget(QtWidgets.QWidget):
                 return
 
             # Server selection check
-            if not any(chbx.isChecked() for chbx in self.setup_widgets['selection'].widgets.values()):
+            if not any(chbx.isChecked() for chbx in [val['checkbox'] for val in self.setup_widgets['selection'].widgets.values()]):
                 logging.warning('No server selected. Please select a server by checking the box. If no server is shown, add a server.')
+                self.isSetup = False
+                return
+
+            # Make sure, no servers have same name
+            server_names = [(val['edit'].text() or val['edit'].placeholderText()) for val in self.setup_widgets['selection'].widgets.values()]
+            if len(set(server_names)) != len(server_names):
+                logging.warning("Every server must have a unique name. Please rename the respective servers")
                 self.isSetup = False
                 return
 
@@ -474,7 +481,7 @@ class ServerSelection(GridContainer):
                                                                                              'name': e.text() or e.placeholderText()})
                                      if c.isChecked() else e.placeholderText())  # Do dummy action to make lambda possible
 
-            self.widgets[ip] = chbx
+            self.widgets[ip] = {'checkbox': chbx, 'edit': edit}
 
             self.add_widget(widget=[chbx, edit])
 
