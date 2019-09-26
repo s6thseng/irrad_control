@@ -469,7 +469,7 @@ class ServerSelection(GridContainer):
 
             chbx = QtWidgets.QCheckBox(str(ip))
             edit = QtWidgets.QLineEdit()
-            default = 'Server {}'.format(i + 1)
+            default = 'Server_{}'.format(i + 1)
             edit.setPlaceholderText(default if ip not in network_config['server']['all'] else network_config['server']['all'][ip] if network_config['server']['all'][ip] != 'none' else default)
 
             # Connect
@@ -518,7 +518,7 @@ class ServerSetupWidget(QtWidgets.QWidget):
         """Add a server  with ip *ip* for setup"""
 
         # Number servers
-        current_server = name if name is not None else 'Server {}'.format(self.tabs.count() + 1)
+        current_server = name if name is not None else 'Server_{}'.format(self.tabs.count() + 1)
 
         # If this server is not already in setup
         if ip not in self.server_ips:
@@ -691,7 +691,7 @@ class TempSetup(GridContainer):
         for i in range(self.n_sensors):
             chbx = QtWidgets.QCheckBox()
             edit = QtWidgets.QLineEdit()
-            edit.setPlaceholderText('Sens. {}'.format(i + 1))
+            edit.setPlaceholderText('Sens_{}'.format(i + 1))
             chbx.stateChanged.connect(lambda state, e=edit: e.setEnabled(state))
             if i == 0:
                 chbx.setChecked(True)
