@@ -6,6 +6,7 @@ ports:
   temp: 8504
 server:
   all:
-    131.220.162.129: none
-    131.220.221.84: none
+    131.220.162.129: TestServer2
+    131.220.162.252: TestServer1
+    131.220.221.84: Hochstromraum
   default: 131.220.221.84
