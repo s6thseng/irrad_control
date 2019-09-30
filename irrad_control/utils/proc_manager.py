@@ -23,6 +23,9 @@ class ProcessManager(object):
         # Interpreter process; only one
         self.interpreter_proc = None
 
+        # Keep track of processes which have been started
+        self.current_procs = []
+
     def connect_to_server(self, hostname, username):
 
         # Update if we have no server credentials
