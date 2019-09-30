@@ -19,11 +19,9 @@ class ProcessManager(object):
         # Server connection related; multiple servers can exist
         self.server = {}
         self.client = {}
-        self.server_pid = {}
 
         # Interpreter process; only one
         self.interpreter_proc = None
-        self.interpreter_pid = None
 
     def connect_to_server(self, hostname, username):
 
@@ -92,18 +90,6 @@ class ProcessManager(object):
         logging.info('Starting interpreter process...')
 
         self.interpreter_proc = self._call_script(script=os.path.join(package_path, 'irrad_interpreter.py'), args=setup_yaml)
-
-    def set_server_pid(self, hostname, pid):
-        
-        logging.info('Server process running with PID {}'.format(pid))
-        
-        self.server_pid[hostname] = pid
-
-    def set_interpreter_pid(self, pid):
-
-        logging.info('Interpreter process running with PID {}'.format(pid))
-
-        self.interpreter_pid = pid
 
     def _call_script(self, script, args, cmd=None):
 
