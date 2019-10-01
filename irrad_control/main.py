@@ -4,7 +4,7 @@ import logging
 import platform
 import zmq
 import yaml
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from email import message_from_string
 from pkg_resources import get_distribution, DistributionNotFound
 from PyQt5 import QtCore, QtWidgets, QtGui
@@ -61,6 +61,12 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         # Class to manage the server, interpreter and additional subprocesses
         self.proc_mngr = ProcessManager()
+
+        # Keep track of send commands in order to wait for their response
+        self._cmd_id = 0
+        self._cmd_reply = defaultdict(list)
+        self._try_close = False
+        self._log_close = False
         
         # Connect signals
         self.data_received.connect(lambda data: self.handle_data(data))
@@ -254,14 +260,15 @@ class IrradControlWin(QtWidgets.QMainWindow):
             # Prepare server in QThread on init
             server_config_workers[server] = Worker(func=self.proc_mngr.configure_server, hostname=server, branch='development')
 
-            # Connect workers exception to log
-            self._connect_worker_exception(worker=server_config_workers[server])
-
             # Connect workers finish signal to starting process on server
             for con in [lambda _server=server: self.proc_mngr.start_server_process(_server, self.setup['port']['cmd']),
                         lambda _server=server: self.send_cmd(hostname=_server, target='server', cmd='start', cmd_data={'setup': self.setup, 'server': _server})
                         ]:
                 server_config_workers[server].signals.finished.connect(con)
+
+            # Connect workers exception to log
+            self._connect_worker_exception(worker=server_config_workers[server])
+            self._connect_worker_close(server_config_workers[server], server)
 
             # Launch worker on QThread
             self.threadpool.start(server_config_workers[server])
@@ -282,6 +289,12 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
     def _connect_worker_exception(self, worker):
         worker.signals.exceptionSignal.connect(lambda e, trace: logging.error("{} on sub-thread: {}".format(type(e).__name__, trace)))
+
+    def _connect_worker_close(self, worker, hostname):
+        self._cmd_reply[hostname].append(self._cmd_id)
+        for con in [lambda _hostname=hostname, cmd_id=self._cmd_id: self._cmd_reply[_hostname].remove(cmd_id), self._check_close]:
+            worker.signals.finished.connect(con)
+        self._cmd_id += 1
         
     def _tcp_addr(self, port, ip='*'):
         """Creates string of complete tcp address which sockets can bind to"""
@@ -365,7 +378,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
                 self.control_tab.scan_actions(data['data']['status'])
             
-    def send_cmd(self, hostname, target, cmd, cmd_data=None):
+    def send_cmd(self, hostname, target, cmd, cmd_data=None, check_reply=True):
         """Send a command *cmd* to a target *target* running within the server or interpreter process.
         The command can have respective data *cmd_data*. Targets must be listed in self._targets."""
 
@@ -379,6 +392,10 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         # Make connections
         self._connect_worker_exception(worker=cmd_worker)
+
+        # Keep track of commands
+        if check_reply:
+            self._connect_worker_close(cmd_worker, hostname)
 
         # Start
         self.threadpool.start(cmd_worker)
@@ -567,6 +584,11 @@ class IrradControlWin(QtWidgets.QMainWindow):
     def file_quit(self):
         self.close()
 
+    def _check_close(self):
+        """Check whether we're waiting for cmd replies in order to close"""
+        if self._try_close:
+            self.close()
+
     def _clean_up(self):
 
         # Stop receiver threads
@@ -579,8 +601,25 @@ class IrradControlWin(QtWidgets.QMainWindow):
     def closeEvent(self, event):
         """Catches closing event and invokes customized closing routine"""
 
+        # Indicate that we want to close
+        self._try_close = True
+
+        if any(val for val in self._cmd_reply.values()):
+
+            if not self._log_close:
+                for host in self._cmd_reply:
+                    if self._cmd_reply[host]:
+                        msg = "Waiting for reply from {} with command ID(s): {}".format(host, ', '.join([str(i) for i in self._cmd_reply[host]]))
+                        logging.warning(msg)
+
+                logging.warning("{} will be closed after all remaining replies have been received".format(PROJECT_NAME))
+                self._log_close = True
+
+            # Ignore closing
+            event.ignore()
+
         # There are subprocesses to shut down
-        if self.proc_mngr.current_procs:
+        elif self.proc_mngr.current_procs:
 
             # Loop over all started processes and send shutdown cmd
             for host in self.proc_mngr.current_procs:
@@ -588,12 +627,12 @@ class IrradControlWin(QtWidgets.QMainWindow):
                 # Shutdown all the servers
                 if host in self.setup['server']:
                     logging.info("Shutting down server at {}".format(host))
-                    self.send_cmd(host, 'server', 'shutdown')
+                    self.send_cmd(host, 'server', 'shutdown', check_reply=False)
 
                 # Shutdown interpreter
                 if host == 'localhost':
                     logging.info("Shutting down interpreter...")
-                    self.send_cmd(host, 'interpreter', 'shutdown')
+                    self.send_cmd(host, 'interpreter', 'shutdown', check_reply=False)
 
                 # Ignore closing
                 event.ignore()
@@ -601,7 +640,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         else:
 
             self._clean_up()
-            
+
             # Close
             event.accept()
 
