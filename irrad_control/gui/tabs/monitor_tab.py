@@ -40,7 +40,7 @@ class IrradMonitorTab(QtWidgets.QWidget):
 
                     if monitor == 'raw':
 
-                        self.plots[server]['raw_plot'] = RawDataPlot(self.setup[server], daq_device=self.setup[server]['daq']['sem'])
+                        self.plots[server]['raw_plot'] = RawDataPlot(self.setup[server], daq_device=self.setup[server]['devices']['daq']['sem'])
 
                         monitor_widget = PlotWrapperWidget(self.plots[server]['raw_plot'])
 
@@ -50,8 +50,8 @@ class IrradMonitorTab(QtWidgets.QWidget):
                         monitor_widget.setOrientation(QtCore.Qt.Horizontal)
                         monitor_widget.setChildrenCollapsible(False)
 
-                        self.plots[server]['current_plot'] = BeamCurrentPlot(daq_device=self.setup[server]['daq']['sem'])
-                        self.plots[server]['pos_plot'] = BeamPositionPlot(self.setup[server], daq_device=self.setup[server]['daq']['sem'])
+                        self.plots[server]['current_plot'] = BeamCurrentPlot(daq_device=self.setup[server]['devices']['daq']['sem'])
+                        self.plots[server]['pos_plot'] = BeamPositionPlot(self.setup[server], daq_device=self.setup[server]['devices']['daq']['sem'])
 
                         beam_current_wrapper = PlotWrapperWidget(self.plots[server]['current_plot'])
                         beam_pos_wrapper = PlotWrapperWidget(self.plots[server]['pos_plot'])
