@@ -358,12 +358,11 @@ class RawDataPlot(ScrollingIrradDataPlot):
         self.daq_setup = daq_setup
 
         # Call __init__ of ScrollingIrradDataPlot
-        super(RawDataPlot, self).__init__(channels=daq_setup['channels'], units={'left': 'V', 'right': 'A'},
+        super(RawDataPlot, self).__init__(channels=daq_setup['devices']['adc']['channels'], units={'left': 'V'},
                                           name=type(self).__name__ + ('' if daq_device is None else ' ' + daq_device),
                                           parent=parent)
 
         self.plt.setRange(yRange=[-5., 5.])
-        self.update_scale(scale=1e-9 / 5. * daq_setup['ro_scale'], axis='right')
 
 
 class BeamCurrentPlot(ScrollingIrradDataPlot):
@@ -508,9 +507,7 @@ class BeamPositionPlot(pg.PlotWidget):
 
         # Init class attributes
         self.daq_setup = daq_setup
-        self.channels = daq_setup['channels']
-        self.ro_types = daq_setup['types']
-        self.ro_scale = daq_setup['ro_scale']
+        self.ro_types = daq_setup['devices']['adc']['types']
         self.daq_device = daq_device
 
         # Setup the main plot
