@@ -188,11 +188,10 @@ class IrradPlotWidget(pg.PlotWidget):
 class ScrollingIrradDataPlot(IrradPlotWidget):
     """PlotWidget which displays a set of irradiation data curves over time"""
 
-    def __init__(self, channels, ro_scale=None, units=None, period=60, name=None, parent=None):
+    def __init__(self, channels, units=None, period=60, name=None, parent=None):
         super(ScrollingIrradDataPlot, self).__init__(parent)
 
         self.channels = channels
-        self.ro_scale = ro_scale
         self.units = units
         self.name = name
 
@@ -292,9 +291,8 @@ class ScrollingIrradDataPlot(IrradPlotWidget):
                 else:
                     self.curves[ch].setData(self._time, self._data[ch])
 
-    def update_scale(self, scale, axis='left', update=True):
+    def update_axis_scale(self, scale, axis='left'):
         """Update the scale of current axis"""
-        self.ro_scale = scale if update else self.ro_scale
         self.plt.getAxis(axis).setScale(scale=scale)
 
     def update_period(self, period):
