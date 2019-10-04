@@ -621,18 +621,21 @@ class IrradControlWin(QtWidgets.QMainWindow):
         # There are subprocesses to shut down
         elif self.proc_mngr.current_procs:
 
+            # If we're here, there's no more processecs; we will launch closing workers, they should not give warning to user
+            self._log_close = True
+
             # Loop over all started processes and send shutdown cmd
             for host in self.proc_mngr.current_procs:
 
                 # Shutdown all the servers
                 if host in self.setup['server']:
                     logging.info("Shutting down server at {}".format(host))
-                    self.send_cmd(host, 'server', 'shutdown', check_reply=False)
+                    self.send_cmd(host, 'server', 'shutdown')
 
                 # Shutdown interpreter
                 if host == 'localhost':
                     logging.info("Shutting down interpreter...")
-                    self.send_cmd(host, 'interpreter', 'shutdown', check_reply=False)
+                    self.send_cmd(host, 'interpreter', 'shutdown')
 
                 # Ignore closing
                 event.ignore()
