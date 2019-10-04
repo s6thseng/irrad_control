@@ -6,7 +6,7 @@ from collections import OrderedDict
 
 # Matplotlib first 8 default colors
 _MPL_COLORS = [(31, 119, 180), (255, 127, 14), (44, 160, 44), (214, 39, 40),
-              (148, 103, 189), (140, 86, 75), (227, 119, 194), (127, 127, 127)]
+               (148, 103, 189), (140, 86, 75), (227, 119, 194), (127, 127, 127)]
 
 _BOLD_FONT = QtGui.QFont()
 _BOLD_FONT.setBold(True)
@@ -92,6 +92,9 @@ class PlotWrapperWidget(QtWidgets.QWidget):
             self.helper_line = pg.InfiniteLine(angle=0, label=label + ': {value:.2E} ' + unit)
             self.helper_line.setMovable(True)
             self.helper_line.setPen(color='w', style=pg.QtCore.Qt.DashLine, width=2)
+            if hasattr(self.pw, 'unitChanged'):
+                self.pw.unitChanged.connect(lambda u: setattr(self.helper_line.label, 'format', self.pw.plt.getAxis('left').labelText + ': {value:.2E} ' + u))
+                self.pw.unitChanged.connect(self.helper_line.label.valueChanged)
             hl_checkbox = QtWidgets.QCheckBox('Show helper line')
             hl_checkbox.stateChanged.connect(
                 lambda v: self.pw.plt.addItem(self.helper_line) if v else self.pw.plt.removeItem(self.helper_line))
@@ -348,19 +351,97 @@ class ScrollingIrradDataPlot(IrradPlotWidget):
 
 class RawDataPlot(ScrollingIrradDataPlot):
     """Plot for displaying the raw data of all channels of the respective ADC over time.
-        Data is displayed in rolling manner over period seconds"""
+        Data is displayed in rolling manner over period seconds. The plot  unit can be switched between Volt and Ampere"""
+
+    unitChanged = QtCore.pyqtSignal(str)
 
     def __init__(self, daq_setup, daq_device=None, parent=None):
 
         # Init class attributes
         self.daq_setup = daq_setup
 
+        self.use_unit = 'V'
+
         # Call __init__ of ScrollingIrradDataPlot
-        super(RawDataPlot, self).__init__(channels=daq_setup['devices']['adc']['channels'], units={'left': 'V'},
+        super(RawDataPlot, self).__init__(channels=daq_setup['devices']['adc']['channels'], units={'left': self.use_unit},
                                           name=type(self).__name__ + ('' if daq_device is None else ' ' + daq_device),
                                           parent=parent)
 
-        self.plt.setRange(yRange=[-5., 5.])
+        # Make in-plot button to switch between units
+        self.unit_btn = PlotPushButton(plotitem=self.plt, text='Switch unit ({})'.format('A'))
+        self.unit_btn.setPos(self.plt.width()*0.1, self.plt.height()*0.01)
+        self.unit_btn.clicked.connect(self.change_unit)
+
+        # Connect to signal
+        for con in [lambda u: self.plt.getAxis('left').setLabel(text='Signal', units=u),
+                    lambda u: self.unit_btn.setText('Switch unit ({})'.format('A' if u == 'V' else 'V')),
+                    lambda u: setattr(self, '_data', self.convert_to_unit(self._data, u))]:  # convert between units
+            self.unitChanged.connect(con)
+
+    def change_unit(self):
+        self.use_unit = 'V' if self.use_unit == 'A' else 'A'
+        self.unitChanged.emit(self.use_unit)
+
+    def convert_to_unit(self, data, unit):
+        """Method to convert raw data between Volt and Ampere"""
+
+        res = OrderedDict()
+
+        # Loop over data and overwrite
+        for ch in data:
+            _idx = self.channels.index(ch)
+            # Get data, scale and type of channel
+            val, scale, _type = data[ch], self.daq_setup['devices']['adc']['ro_scales'][_idx], self.daq_setup['devices']['adc']['types'][_idx]
+            # Adjust scale in case we're looking at SEM's sum signal; in this case current is multiplied by factor of 4
+            scale *= 1 if _type != 'sem_sum' else 4
+
+            res[ch] = val / 5.0 * scale * 1e-9 if unit == 'A' else val * 5.0 / 1e-9 / scale
+
+        return res
+
+    def set_data(self, data):
+        """Overwrite set_data method in order to show raw data in Ampere and Volt"""
+
+        # Convert voltages to currents and overwrite
+        if self.use_unit == 'A':
+            data['data'] = self.convert_to_unit(data['data'], self.use_unit)
+
+        super(RawDataPlot, self).set_data(data)
+
+
+class PlotPushButton(pg.TextItem):
+    """Implements a in-plot push button for a PlotItem"""
+
+    clicked = QtCore.pyqtSignal()
+
+    def __init__(self, plotitem, **kwargs):
+
+        if 'border' not in kwargs:
+            kwargs['border'] = pg.mkPen(color='w', style=pg.QtCore.Qt.SolidLine)
+
+        super(PlotPushButton, self).__init__(**kwargs)
+
+        self.setParentItem(plotitem)
+        self.setOpacity(0.7)
+        self.btn_area = QtCore.QRectF(self.mapToParent(self.boundingRect().topLeft()), self.mapToParent(self.boundingRect().bottomRight()))
+
+        # Connect to relevant signals
+        plotitem.scene().sigMouseMoved.connect(self._check_hover)
+        plotitem.scene().sigMouseClicked.connect(self._check_click)
+
+    def setPos(self, *args, **kwargs):
+        super(PlotPushButton, self).setPos(*args, **kwargs)
+        self.btn_area = QtCore.QRectF(self.mapToParent(self.boundingRect().topLeft()), self.mapToParent(self.boundingRect().bottomRight()))
+
+    def _check_hover(self, evt):
+        if self.btn_area.contains(evt):
+            self.setOpacity(1.0)
+        else:
+            self.setOpacity(0.7)
+
+    def _check_click(self, b):
+        if self.btn_area.contains(b.scenePos()):
+            self.clicked.emit()
 
 
 class BeamCurrentPlot(ScrollingIrradDataPlot):
