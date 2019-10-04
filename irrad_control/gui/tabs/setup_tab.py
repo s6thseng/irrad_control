@@ -199,7 +199,7 @@ class IrradSetupTab(QtWidgets.QWidget):
                                                                   for i, w in enumerate(self.server_setup.setup_widgets[server]['adc']['channel_edits']) if w.text()]
                     tmp_setup['devices'][device]['ro_scales'] = [_ro_scales[c.currentText()] for i, c in enumerate(self.server_setup.setup_widgets[server]['adc']['scale_combos'])
                                                                  if self.server_setup.setup_widgets[server]['adc']['channel_edits'][i].text()]
-                    tmp_setup['devices'][device]['sampling_rate'] = int(self.server_setup.setup_widgets[server]['adc']['srate_combo'].currentText())
+                    tmp_setup['devices'][device]['sampling_rate'] = float(self.server_setup.setup_widgets[server]['adc']['srate_combo'].currentText())
 
                     # DAQ
                     tmp_setup['devices']['daq'] = {}
