@@ -359,9 +359,10 @@ class IrradInterpreter(multiprocessing.Process):
                 # Do fluence calculation
                 # Mean current over scanning time
                 mean_current, std_current = np.mean(self._beam_currents[server]), np.std(self._beam_currents[server])
+                current_ro_scale = self.adc_setup[server]['ro_scales'][self.ch_type_idx[server][self.current_types['analog']]]
 
                 # Error on current measurement is Delta I = 3.3% I + 1% R_FS
-                actual_current_error = 0.033 * mean_current + 0.01 * self.daq_setup[server]['ro_scale'] * self.nA
+                actual_current_error = 0.033 * mean_current + 0.01 * current_ro_scale * self.nA
 
                 # Quadratically add the measurement error and beam current fluctuation
                 p_f_err = np.sqrt(std_current**2. + actual_current_error**2.)
