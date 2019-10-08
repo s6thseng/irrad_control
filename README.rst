@@ -2,6 +2,8 @@
 Irrad_Control
 ==================================
 
+THIS BRANCH CONTAINS A DEPRECATED VERSION OF IRRAD_CONTROL
+
 Introduction
 ============
 
