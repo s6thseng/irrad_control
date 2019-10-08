@@ -8,8 +8,19 @@ class IrradControlTab(QtWidgets.QWidget):
 
     sendCmd = QtCore.pyqtSignal(dict)
 
-    def __init__(self, parent=None):
+    def __init__(self, setup, parent=None):
         super(IrradControlTab, self).__init__(parent)
+
+        self.setup = setup  # Store setup of server(s)
+        self.stage_server = [server for server in setup if 'stage' in setup[server]['devices']]
+
+        if len(self.stage_server) == 1:
+            self.stage_server = self.stage_server[0]
+        else:
+            if self.stage_server:
+                raise IndexError("Only one server can control a XY-Stage. Currently {} servers have a XY-stage in their setup.".format(len(self.stage_server)))
+            else:
+                self.stage_server = None
 
         # Layouts; split in quadrants
         self.main_layout = QtWidgets.QHBoxLayout()
@@ -192,6 +203,7 @@ class IrradControlTab(QtWidgets.QWidget):
         label_offset = QtWidgets.QLabel('Zero raw data offset:')
         # Button for auto zero offset
         self.btn_auto_zero = QtWidgets.QPushButton('Auto-zero offset')
+        self.btn_auto_zero.clicked.connect(lambda _: self.send_cmd('interpreter', 'autozero'))
 
         # Add to layout
         layout_setup.addWidget(label_daq, 6, 0, 1, 1)
@@ -368,7 +380,10 @@ class IrradControlTab(QtWidgets.QWidget):
 
     def send_cmd(self, target, cmd, cmd_data=None):
         """Function emitting signal with command dict which is send to server in main"""
-        self.sendCmd.emit({'target': target, 'cmd': cmd, 'cmd_data': cmd_data})
+        if target == 'stage':
+            self.sendCmd.emit({'hostname': self.stage_server, 'target': target, 'cmd': cmd, 'cmd_data': cmd_data})
+        elif target == 'interpreter':
+            self.sendCmd.emit({'hostname': 'localhost', 'target': target, 'cmd': cmd, 'cmd_data': cmd_data})
 
     def set_aim_fluence(self, nominal, exponent):
         self.aim_fluence = nominal * 10**exponent

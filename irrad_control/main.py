@@ -305,12 +305,11 @@ class IrradControlWin(QtWidgets.QMainWindow):
         current_tab = self.tabs.currentIndex()
 
         # Create missing tabs
-        self.control_tab = IrradControlTab(parent=self.tabs)
+        self.control_tab = IrradControlTab(setup=self.setup['server'], parent=self.tabs)
         self.monitor_tab = IrradMonitorTab(setup=self.setup['server'], parent=self.tabs)
 
         # Connect control tab
-        #self.control_tab.sendCmd.connect(lambda cmd_dict: self.send_cmd(**cmd_dict)) FIXME! send_cmd takes hostname as arg
-        #self.control_tab.btn_auto_zero.clicked.connect(lambda: self.interpreter.auto_zero.set()) FIXME!
+        self.control_tab.sendCmd.connect(lambda cmd_dict: self.send_cmd(**cmd_dict))
 
         # Make temporary dict for updated tabs
         tmp_tw = {'Control': self.control_tab, 'Monitor': self.monitor_tab}

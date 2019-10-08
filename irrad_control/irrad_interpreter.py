@@ -38,11 +38,11 @@ class IrradInterpreter(multiprocessing.Process):
         self.stop_write_data = multiprocessing.Event()
         self.stop_recv_cmd = threading.Event()
         self.xy_stage_maintenance = multiprocessing.Event()
-        self.auto_zero = multiprocessing.Event()
+        self.auto_zero = dict((server, multiprocessing.Event()) for server in setup['server'].keys())
         self._busy_cmd = False
 
         # Dict of known commands
-        self.commands = {'interpreter': ['shutdown']}
+        self.commands = {'interpreter': ['shutdown', 'autozero']}
 
         # General setup
         self.setup = setup
@@ -253,7 +253,7 @@ class IrradInterpreter(multiprocessing.Process):
                 data[ch] -= self.auto_zero_offset[server][ch][0]
 
             # Get offsets
-            if self.auto_zero.is_set():
+            if self.auto_zero[server].is_set():
                 # Loop over data until sufficient data for mean is collected
                 for ch in data:
                     self._auto_zero_vals[server][ch].append(self.raw_data[server][ch][0])
@@ -261,7 +261,7 @@ class IrradInterpreter(multiprocessing.Process):
                         self.auto_zero_offset[server][ch] = np.mean(self._auto_zero_vals[server][ch])
                 # If all offsets have been found, clear signal and reset list
                 if all(len(self._auto_zero_vals[server][ch]) >= 40 for ch in data):
-                    self.auto_zero.clear()
+                    self.auto_zero[server].clear()
                     self._auto_zero_vals[server] = defaultdict(list)
                     self.auto_zero_offset[server]['timestamp'] = time.time()
                     self.offset_table[server].append(self.auto_zero_offset[server])
@@ -603,6 +603,11 @@ class IrradInterpreter(multiprocessing.Process):
 
             if cmd == 'shutdown':
                 self.shutdown()
+                return cmd
+            elif cmd == 'autozero':
+                # server = cmd_data  # FIXME: pass server as cmd_data
+                for server in self.server:
+                    self.auto_zero[server].set()
                 return cmd
 
     def shutdown(self):
