@@ -96,7 +96,8 @@ class ProcessManager(object):
 
     def _call_script(self, script, args, cmd=None):
 
-        return subprocess.Popen('{} {} {}'.format('python' if not cmd else cmd, script, args),
+        # Call the interpreter subprocess with the same python executable that runs irrad_control
+        return subprocess.Popen('{} {} {}'.format(sys.executable if not cmd else cmd, script, args),
                                 shell=True,
                                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0)
 
