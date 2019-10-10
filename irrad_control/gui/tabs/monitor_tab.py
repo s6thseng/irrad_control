@@ -1,6 +1,6 @@
 from PyQt5 import QtCore, QtWidgets
 from collections import OrderedDict
-from irrad_control.gui.widgets import RawDataPlot, BeamPositionPlot, PlotWrapperWidget, BeamCurrentPlot, FluenceHist
+from irrad_control.gui.widgets import RawDataPlot, BeamPositionPlot, PlotWrapperWidget, BeamCurrentPlot, FluenceHist, TemperatureDataPlot
 
 
 class IrradMonitorTab(QtWidgets.QWidget):
@@ -58,6 +58,12 @@ class IrradMonitorTab(QtWidgets.QWidget):
 
                         monitor_widget.addWidget(beam_current_wrapper)
                         monitor_widget.addWidget(beam_pos_wrapper)
+
+                if 'temp' in self.setup[server]['devices']:
+
+                    if monitor == 'temp':
+                        self.plots[server]['temp_plot'] = TemperatureDataPlot(self.setup[server], daq_device=self.setup[server]['devices']['daq']['sem'])
+                        monitor_widget = PlotWrapperWidget(self.plots[server]['temp_plot'])
 
                 if monitor_widget is not None:
                     self.monitor_tabs[server].addTab(monitor_widget, monitor.capitalize())
