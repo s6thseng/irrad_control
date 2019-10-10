@@ -376,6 +376,10 @@ class IrradControlWin(QtWidgets.QMainWindow):
             elif data['data']['status'] == 'finished':
 
                 self.control_tab.scan_actions(data['data']['status'])
+
+        elif data['meta']['type'] == 'temp':
+
+            self.monitor_tab.plots[server]['temp_plot'].set_data(data)
             
     def send_cmd(self, hostname, target, cmd, cmd_data=None, check_reply=True):
         """Send a command *cmd* to a target *target* running within the server or interpreter process.
