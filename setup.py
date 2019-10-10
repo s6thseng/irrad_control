@@ -8,7 +8,7 @@ try:
 except IndexError:
     _server = False
 
-version = '0.0.1'
+version = '1.0.1'
 author = 'Pascal Wolf'
 author_email = 'wolf@physik.uni-bonn.de'
 
