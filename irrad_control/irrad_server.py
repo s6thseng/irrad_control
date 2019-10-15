@@ -288,7 +288,7 @@ class IrradServer(multiprocessing.Process):
                 if axis == 'x':
                     self.xy_stage.move_absolute(cmd_data['distance'], self.xy_stage.x_axis, unit=cmd_data['unit'])
                 elif axis == 'y':
-                    _m_dist = self.xy_stage.steps_to_distance(int(300e-3 / self.microstep), unit=cmd_data['unit'])
+                    _m_dist = self.xy_stage.steps_to_distance(int(300e-3 / self.xy_stage.microstep), unit=cmd_data['unit'])
                     d = _m_dist - cmd_data['distance']
                     self.xy_stage.move_absolute(d, self.xy_stage.y_axis, unit=cmd_data['unit'])
 
