@@ -49,11 +49,13 @@ class ZaberXYStage:
         self.y_range_mm = [r * self.microstep * 1e3 for r in self.y_range_steps]
 
         # y-axis is inverted
-        self.home_position = (0, self.y_range_steps[-1])
+        self.home_position = (self.x_range_steps[0], self.y_range_steps[-1])
+
+        # Current position of stage in mm; always holds the position in steps and is updated after movement
+        self.position = self.get_position(unit='mm')
 
         # Attributes related to scanning
         self.scan_params = {}  # Dict to hold relevant scan parameters
-        #self.scan_thread = None  # Attribute for separate scanning thread
         self.context = zmq.Context()  # ZMQ context for publishing data from self.scan_thread
         self.stop_scan = threading.Event()  # Event to stop scan
         self.finish_scan = threading.Event()  # Event to finish a scan after completing all rows of current iteration
@@ -210,6 +212,24 @@ class ZaberXYStage:
 
         return speed if unit is None else self.speed_to_unit(speed, unit)
 
+    def get_position(self, unit='mm'):
+        """
+        Returns the current position of the XY-stage in given unit
+
+        unit : str, None
+            unit in which range is given. Must be in self.dist_units. If None, set speed in steps
+        """
+
+        unit = unit if unit is None else self._check_unit(unit, self.dist_units)
+
+        pos = [x.get_position() for x in (self.x_axis, self.y_axis)]
+
+        pos[1] = 604724 - pos[1]  # Physical max. travel range is 300 mm == 604724 * self.microstep
+
+        pos = pos if unit is None else [self.steps_to_distance(r, unit) for r in pos]
+
+        return pos
+
     def set_range(self, _range, axis, unit='mm'):
         """
         Set the speed at which axis moves for move rel and move abs commands
@@ -279,7 +299,7 @@ class ZaberXYStage:
 
         unit = unit if unit is None else self._check_unit(unit, self.dist_units)
 
-        return _range if unit is None else [r * self.microstep * self.dist_units[unit] / 1e-3 for r in _range]
+        return _range if unit is None else [self.steps_to_distance(r, unit) for r in _range]
 
     def accel_to_step_s2(self, accel, unit="mm/s^2"):
         """
@@ -412,7 +432,24 @@ class ZaberXYStage:
 
         return int(self.dist_units[unit] / 1e3 * distance / self.microstep)
 
-    def _move_axis_rel(self, distance, axis, unit="mm"):
+    def steps_to_distance(self, steps, unit="mm"):
+        """
+        Method to convert a *steps* given in distance given in *unit*
+
+        Parameters
+        ----------
+        steps : int
+            distance in steps or position in steps
+        unit : str
+            unit in which distance is given. Must be in self.dist_units
+        """
+
+        # Check if unit is sane; if it checks out, return same unit, else returns smallest available unit
+        unit = self._check_unit(unit, self.dist_units)
+
+        return float(steps * self.microstep * self.dist_units[unit] / 1e-3)
+
+    def move_relative(self, distance, axis, unit="mm"):
         """
         Method to move either in vertical or horizontal direction relative to the current position.
         Does sanity check on travel destination and axis
@@ -451,33 +488,36 @@ class ZaberXYStage:
 
         return _reply
 
-    def move_vertical(self, distance, unit="mm"):
+    def move_absolute(self, position, axis, unit="mm"):
         """
-        Method to move along the y axis relative to the current position
+        Method to move along the given axis to the absolute position
 
         Parameters
         ----------
-        distance : float
-            distance of travel
+        position : float, int
+            distance of travel in steps or float with a unit
+        axis : zaber.serial.AsciiAxis
+            either self.x_axis or self.y_axis
         unit : str
-            unit in which distance is given. Must be in self.dist_units
+            unit in which distance is given. Must be in self.dist_units. If None, unterpret as steps
         """
 
-        self._move_axis_rel(distance, self.y_axis, unit)
+        # Get position in steps
+        pos_steps = position if unit is None else self.distance_to_steps(position, unit)
 
-    def move_horizontal(self, distance, unit="mm"):
-        """
-        Method to move along the x axis relative to the current position
+        # Get minimum and maximum steps of travel
+        min_step, max_step = int(axis.send("get limit.min").data), int(axis.send("get limit.max").data)
 
-        Parameters
-        ----------
-        distance : float
-            distance of travel
-        unit : str
-            unit in which distance is given. Must be in self.dist_units
-        """
+        # Check whether there's still room to move
+        if not min_step <= pos_steps <= max_step:
+            logging.error("Movement out of travel range. Abort!")
+            return
 
-        self._move_axis_rel(distance, self.x_axis, unit)
+        # Send command to axis and return reply
+        _reply = axis.move_abs(pos_steps)
+        self._check_reply(_reply)
+
+        return _reply
 
     def prepare_scan(self, rel_start_point, rel_end_point, scan_speed, step_size, tcp_address, server):
         """
@@ -741,8 +781,7 @@ class ZaberXYStage:
             while not (self.stop_scan.wait(1e-1) or self.finish_scan.wait(1e-1)):
 
                 # Determine whether we're going from top to bottom or opposite
-                _tmp_rows = list(range(scan_params['n_rows']) if scan % 2 == 0
-                                 else reversed(range(scan_params['n_rows'])))
+                _tmp_rows = list(range(scan_params['n_rows']) if scan % 2 == 0 else reversed(range(scan_params['n_rows'])))
 
                 # Loop over rows
                 for row in _tmp_rows:

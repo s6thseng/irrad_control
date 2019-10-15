@@ -276,10 +276,10 @@ class IrradServer(multiprocessing.Process):
                 axis = cmd_data['axis']
                 _data = None
                 if axis == 'x':
-                    self.xy_stage.move_horizontal(cmd_data['distance'], unit=cmd_data['unit'])
+                    self.xy_stage.move_relative(cmd_data['distance'], self.xy_stage.x_axis, unit=cmd_data['unit'])
                     _data = self.xy_stage.microstep * self.xy_stage.x_axis.get_position()
                 elif axis == 'y':
-                    self.xy_stage.move_vertical(cmd_data['distance'], unit=cmd_data['unit'])
+                    self.xy_stage.move_relative(cmd_data['distance'], self.xy_stage.y_axis, unit=cmd_data['unit'])
                     _data = self.xy_stage.microstep * self.xy_stage.y_axis.get_position()
 
                 self._send_reply(reply='move_rel', _type='STANDARD', sender='stage', data=_data)
