@@ -466,10 +466,10 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
             elif sender == 'stage':
 
-                if reply == 'pos':
+                if reply in ['pos', 'move_rel', 'move_abs']:
                     self.control_tab.update_position(reply_data)
 
-                elif reply == 'get_speed':
+                elif reply in ['set_speed', 'get_speed']:
                     self.control_tab.update_speed(reply_data)
 
                 elif reply == 'prepare':
@@ -493,8 +493,12 @@ class IrradControlWin(QtWidgets.QMainWindow):
                     else:
                         logging.debug("No beam event cleared")
 
+            # Debug
+            msg = 'Standard {} reply received: {}'.format(sender.capitalize(), reply)
+            logging.debug(msg)
+
         elif _type == 'ERROR':
-            msg = '{} error occured: {}'.format(sender.capitalize(), reply)
+            msg = '{} error occurred: {}'.format(sender.capitalize(), reply)
             logging.error(msg)
             self.log_dock.setVisible(True)
 

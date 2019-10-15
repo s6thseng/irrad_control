@@ -44,15 +44,8 @@ class ZaberXYStage:
         self.x_range_steps = [int(self.x_axis.send("get limit.min").data), int(self.x_axis.send("get limit.max").data)]
         self.y_range_steps = [int(self.y_axis.send("get limit.min").data), int(self.y_axis.send("get limit.max").data)]
 
-        # Travel ranges in mm
-        self.x_range_mm = [r * self.microstep * 1e3 for r in self.x_range_steps]
-        self.y_range_mm = [r * self.microstep * 1e3 for r in self.y_range_steps]
-
-        # y-axis is inverted
-        self.home_position = (self.x_range_steps[0], self.y_range_steps[-1])
-
         # Current position of stage in mm; always holds the position in steps and is updated after movement
-        self.position = self.get_position(unit='mm')
+        self.position = self.get_position()
 
         # Attributes related to scanning
         self.scan_params = {}  # Dict to hold relevant scan parameters
@@ -103,15 +96,11 @@ class ZaberXYStage:
 
     def home_x_axis(self):
         """Move x axis to the home position and check and return reply"""
-        _reply = self.x_axis.move_abs(self.home_position[0])
-        self._check_reply(_reply)
-        return _reply
+        return self.move_absolute(self.x_range_steps[0], self.x_axis)
 
     def home_y_axis(self):
-        """Move x axis to the home position and check and return reply"""
-        _reply = self.y_axis.move_abs(self.home_position[-1])
-        self._check_reply(_reply)
-        return _reply
+        """Move y axis to the home position and check and return reply. y is inverted"""
+        return self.move_absolute(self.y_range_steps[-1], self.y_axis)
 
     def speed_to_step_s(self, speed, unit="mm/s"):
         """
@@ -212,7 +201,7 @@ class ZaberXYStage:
 
         return speed if unit is None else self.speed_to_unit(speed, unit)
 
-    def get_position(self, unit='mm'):
+    def get_position(self, unit=None):
         """
         Returns the current position of the XY-stage in given unit
 
@@ -224,7 +213,7 @@ class ZaberXYStage:
 
         pos = [x.get_position() for x in (self.x_axis, self.y_axis)]
 
-        pos[1] = 604724 - pos[1]  # Physical max. travel range is 300 mm == 604724 * self.microstep
+        pos[1] = int(300e-3 / self.microstep) - pos[1]  # Physical max. travel range is 300 mm == 604724 * self.microstep
 
         pos = pos if unit is None else [self.steps_to_distance(r, unit) for r in pos]
 
@@ -263,13 +252,6 @@ class ZaberXYStage:
         # Travel ranges in microsteps
         self.x_range_steps = self.get_range(self.x_axis, unit=None)
         self.y_range_steps = self.get_range(self.y_axis, unit=None)
-
-        # Travel ranges in mm
-        self.x_range_mm = [r * self.microstep * 1e3 for r in self.x_range_steps]
-        self.y_range_mm = [r * self.microstep * 1e3 for r in self.y_range_steps]
-
-        # y-axis is inverted
-        self.home_position = (self.x_range_steps[0], self.y_range_steps[-1])
 
         return _replies
 
@@ -449,7 +431,7 @@ class ZaberXYStage:
 
         return float(steps * self.microstep * self.dist_units[unit] / 1e-3)
 
-    def move_relative(self, distance, axis, unit="mm"):
+    def move_relative(self, distance, axis, unit=None):
         """
         Method to move either in vertical or horizontal direction relative to the current position.
         Does sanity check on travel destination and axis
@@ -460,12 +442,12 @@ class ZaberXYStage:
             distance of travel
         axis : zaber.serial.AsciiAxis
             either self.x_axis or self.y_axis
-        unit : str
-            unit in which distance is given. Must be in self.dist_units
+        unit : None, str
+            unit in which distance is given. Must be in self.dist_units. If None, interpret as steps
         """
 
         # Get distance in steps
-        dist_steps = self.distance_to_steps(distance, unit)
+        dist_steps = distance if unit is None else self.distance_to_steps(distance, unit)
 
         # Get current position
         curr_pos = axis.get_position()
@@ -486,9 +468,12 @@ class ZaberXYStage:
         _reply = axis.move_rel(dist_steps)
         self._check_reply(_reply)
 
+        # Update position
+        self.position = self.get_position()
+
         return _reply
 
-    def move_absolute(self, position, axis, unit="mm"):
+    def move_absolute(self, position, axis, unit=None):
         """
         Method to move along the given axis to the absolute position
 
@@ -498,8 +483,8 @@ class ZaberXYStage:
             distance of travel in steps or float with a unit
         axis : zaber.serial.AsciiAxis
             either self.x_axis or self.y_axis
-        unit : str
-            unit in which distance is given. Must be in self.dist_units. If None, unterpret as steps
+        unit : None, str
+            unit in which distance is given. Must be in self.dist_units. If None, interpret as steps
         """
 
         # Get position in steps
@@ -516,6 +501,9 @@ class ZaberXYStage:
         # Send command to axis and return reply
         _reply = axis.move_abs(pos_steps)
         self._check_reply(_reply)
+
+        # Update position
+        self.position = self.get_position()
 
         return _reply
 
@@ -694,7 +682,7 @@ class ZaberXYStage:
 
         # Check whether we are scanning from origin
         if from_origin:
-            x_reply = self.x_axis.move_abs(x_start)
+            x_reply = self.move_absolute(x_start, self.x_axis)
 
             # Check reply; if something went wrong raise error
             if not self._check_reply(x_reply):
@@ -702,7 +690,7 @@ class ZaberXYStage:
                 raise UnexpectedReplyError(msg)
 
         # Move to the current row
-        y_reply = self.y_axis.move_abs(scan_params['rows'][row])
+        y_reply = self.move_absolute(scan_params['rows'][row], self.y_axis)
 
         # Check reply; if something went wrong raise error
         if not self._check_reply(y_reply):
@@ -713,14 +701,14 @@ class ZaberXYStage:
         _meta = {'timestamp': time.time(), 'name': scan_params['server'], 'type': 'stage'}
         _data = {'status': 'start', 'scan': scan, 'row': row,
                  'speed': self.get_speed(self.x_axis, unit='mm/s'),
-                 'x_start': self.x_axis.get_position() * self.microstep,
-                 'y_start': self.y_axis.get_position() * self.microstep}
+                 'x_start': self.steps_to_distance(self.position[0], unit='mm'),
+                 'y_start': self.steps_to_distance(self.position[1], unit='mm')}
 
         # Publish data
         stage_pub.send_json({'meta': _meta, 'data': _data})
 
         # Scan the current row
-        x_reply = self.x_axis.move_abs(x_end if self.x_axis.get_position() == x_start else x_start)
+        x_reply = self.move_absolute(x_end if self.x_axis.get_position() == x_start else x_start, self.x_axis)
 
         # Check reply; if something went wrong raise error
         if not self._check_reply(x_reply):
@@ -730,8 +718,8 @@ class ZaberXYStage:
         # Send stop data
         _meta = {'timestamp': time.time(), 'name': scan_params['server'], 'type': 'stage'}
         _data = {'status': 'stop',
-                 'x_stop': self.x_axis.get_position() * self.microstep,
-                 'y_stop': self.y_axis.get_position() * self.microstep}
+                 'x_stop': self.steps_to_distance(self.position[0], unit='mm'),
+                 'y_stop': self.steps_to_distance(self.position[1], unit='mm')}
 
         # Publish data
         stage_pub.send_json({'meta': _meta, 'data': _data})
@@ -741,8 +729,8 @@ class ZaberXYStage:
 
         if from_origin:
             # Move back to origin; move y first in order to not scan over device
-            self.y_axis.move_abs(scan_params['origin'][1])
-            self.x_axis.move_abs(scan_params['origin'][0])
+            self.move_absolute(scan_params['origin'][1], self.y_axis)
+            self.move_absolute(scan_params['origin'][0], self.x_axis)
 
     def _scan_device(self, scan_params):
         """
@@ -760,8 +748,8 @@ class ZaberXYStage:
         stage_pub.bind(scan_params['tcp_address'])
 
         # Move to start point
-        self.x_axis.move_abs(scan_params['start_pos'][0])
-        self.y_axis.move_abs(scan_params['start_pos'][1])
+        self.move_absolute(scan_params['start_pos'][0], self.x_axis)
+        self.move_absolute(scan_params['start_pos'][1], self.y_axis)
 
         # Set the scan speed
         self.set_speed(scan_params['speed'], self.x_axis, unit='mm/s')
@@ -828,8 +816,8 @@ class ZaberXYStage:
             self.set_speed(10, self.y_axis, unit='mm/s')
 
             # Move back to origin; move y first in order to not scan over device
-            self.y_axis.move_abs(scan_params['origin'][1])
-            self.x_axis.move_abs(scan_params['origin'][0])
+            self.move_absolute(scan_params['origin'][1], self.y_axis)
+            self.move_absolute(scan_params['origin'][0], self.x_axis)
 
             # Reset signal so one can scan again
             if self.stop_scan.is_set():
