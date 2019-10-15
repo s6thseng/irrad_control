@@ -314,7 +314,7 @@ class IrradServer(multiprocessing.Process):
 
                 _data = [self.xy_stage.get_range(self.xy_stage.x_axis, unit='mm'), self.xy_stage.get_range(self.xy_stage.y_axis, unit='mm')]
 
-                self._send_reply(reply='set_speed', _type='STANDARD', sender='stage', data=_data)
+                self._send_reply(reply='set_range', _type='STANDARD', sender='stage', data=_data)
 
             elif cmd == 'prepare':
                 self.xy_stage.prepare_scan(tcp_address=self._tcp_addr(port=self.setup['port']['stage']),
