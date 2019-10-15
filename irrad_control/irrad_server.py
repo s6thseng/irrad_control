@@ -36,7 +36,7 @@ class IrradServer(multiprocessing.Process):
                          'temp': [],
                          'server': ['start', 'shutdown'],
                          'stage': ['move_rel', 'move_abs', 'prepare', 'scan', 'finish', 'stop', 'pos', 'home',
-                                   'set_speed', 'get_speed', 'no_beam']
+                                   'set_speed', 'get_speed', 'no_beam', 'set_range']
                          }
 
         # Attribute to store setup in
@@ -303,6 +303,15 @@ class IrradServer(multiprocessing.Process):
                     self.xy_stage.set_speed(cmd_data['speed'], self.xy_stage.x_axis, unit=cmd_data['unit'])
                 elif axis == 'y':
                     self.xy_stage.set_speed(cmd_data['speed'], self.xy_stage.y_axis, unit=cmd_data['unit'])
+
+                self._send_reply(reply='set_speed', _type='STANDARD', sender='stage')
+
+            elif cmd == 'set_range':
+                axis = cmd_data['axis']
+                if axis == 'x':
+                    self.xy_stage.set_range(cmd_data['range'], self.xy_stage.x_axis, unit=cmd_data['unit'])
+                elif axis == 'y':
+                    self.xy_stage.set_range(cmd_data['range'], self.xy_stage.y_axis, unit=cmd_data['unit'])
 
                 self._send_reply(reply='set_speed', _type='STANDARD', sender='stage')
 

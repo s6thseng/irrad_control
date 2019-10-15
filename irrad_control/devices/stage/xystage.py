@@ -210,6 +210,77 @@ class ZaberXYStage:
 
         return speed if unit is None else self.speed_to_unit(speed, unit)
 
+    def set_range(self, _range, axis, unit='mm'):
+        """
+        Set the speed at which axis moves for move rel and move abs commands
+
+        Parameters
+        ----------
+        _range : iterable
+            range to be set, must be of len 2
+        axis : zaber.serial.AsciiAxis
+            either self.x_axis or self.y_axis
+        unit : str, None
+            unit in which range is given. Must be in self.dist_units. If None, set speed in steps
+        """
+
+        if len(_range) != 2:
+            logging.warning("Range must be 2-element iterable containing lower and upper limit. Abort")
+            return
+
+        # Check if axis is known
+        if axis not in (self.x_axis, self.y_axis):
+            logging.warning("Unknown axis. Abort.")
+            return
+
+        _replies = [axis.send("set limit.min {}".format(_range[0] if unit is None else self.distance_to_steps(distance=_range[0], unit=unit))),
+                    axis.send("set limit.max {}".format(_range[1] if unit is None else self.distance_to_steps(distance=_range[1], unit=unit)))]
+
+        for _reply in _replies:
+            self._check_reply(_reply)
+
+        # Update
+        # Travel ranges in microsteps
+        self.x_range_steps = self.get_range(self.x_axis, unit=None)
+        self.y_range_steps = self.get_range(self.y_axis, unit=None)
+
+        # Travel ranges in mm
+        self.x_range_mm = [r * self.microstep * 1e3 for r in self.x_range_steps]
+        self.y_range_mm = [r * self.microstep * 1e3 for r in self.y_range_steps]
+
+        # y-axis is inverted
+        self.home_position = (self.x_range_steps[0], self.y_range_steps[-1])
+
+        return _replies
+
+    def get_range(self, axis, unit='mm'):
+        """
+        Get the travel range of axis
+
+        Parameters
+        ----------
+        axis : zaber.serial.AsciiAxis
+            either self.x_axis or self.y_axis
+        unit : str, None
+            unit in which range should be converted. Must be in self.dist_units. If None, return speed in steps
+        """
+
+        # Check if axis is known
+        if axis not in (self.x_axis, self.y_axis):
+            logging.warning("Unknown axis. Abort.")
+            return
+
+        # Issue command and wait for reply and check
+        _replies = [axis.send("get limit.min"), axis.send("get limit.max")]
+        success = [self._check_reply(_reply) for _reply in _replies]
+
+        # Get speed in steps per second; 0 if command didn't succeed
+        _range = [0 if not success[i] else int(_reply.data) for i, reply in enumerate(_replies)]
+
+        unit = unit if unit is None else self._check_unit(unit, self.dist_units)
+
+        return _range if unit is None else [r * self.microstep * self.dist_units[unit] / 1e-3 for r in _range]
+
     def accel_to_step_s2(self, accel, unit="mm/s^2"):
         """
         Method to convert acceleration *accel* given in *unit* into micro steps per square second
