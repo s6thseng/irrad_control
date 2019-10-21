@@ -248,7 +248,7 @@ class IrradSetupWidget(QtWidgets.QWidget):
 
         network_setup.serverIPsFound.connect(lambda ips: server_selection.add_selection(ips))
         network_setup.serverIPsFound.connect(
-            lambda ips:
+            lambda ips: None if len(ips) == 0 else
             server_selection.widgets[ips[0]]['checkbox'].setChecked(1)
             if (network_config['server']['default'] not in ips or len(ips) == 1)
             else server_selection.widgets[network_config['server']['default']]['checkbox'].setChecked(1)
