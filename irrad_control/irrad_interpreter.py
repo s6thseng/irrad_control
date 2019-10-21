@@ -605,18 +605,18 @@ class IrradInterpreter(multiprocessing.Process):
 
             if cmd == 'shutdown':
                 self.shutdown()
-                self._send_reply(reply=cmd, sender='interpreter', _type='STANDARD')
+                self._send_reply(reply=cmd, sender=target, _type='STANDARD')
 
             elif cmd == 'zero_offset':
                 self.zero_offset[cmd_data].set()
-                self._send_reply(reply=cmd, sender='interpreter', _type='STANDARD')
+                self._send_reply(reply=cmd, sender=target, _type='STANDARD')
 
             elif cmd == 'record_data':
                 if self.stop_write_data[cmd_data].is_set():
                     self.stop_write_data[cmd_data].clear()
                 else:
                     self.stop_write_data[cmd_data].set()
-                self._send_reply(reply=cmd, sender='interpreter', _type='STANDARD', data=not self.stop_write_data[cmd_data].is_set())
+                self._send_reply(reply=cmd, sender=target, _type='STANDARD', data=not self.stop_write_data[cmd_data].is_set())
 
         self._busy_cmd = False
 

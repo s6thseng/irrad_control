@@ -434,7 +434,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
             if sender == 'server':
 
-                if reply == 'pid':
+                if reply == 'start':
 
                     self.proc_mngr.current_procs.append(hostname)
                     self.tabs.setCurrentIndex(self.tabs.indexOf(self.monitor_tab))
