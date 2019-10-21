@@ -9,7 +9,7 @@ import yaml
 import numpy as np
 import tables as tb
 from zmq.log import handlers
-from irrad_control import daq_config, xy_stage_stats, config_path
+from irrad_control import daq_config, xy_stage_config, package_path
 from collections import defaultdict
 
 
@@ -32,7 +32,7 @@ class IrradInterpreter(multiprocessing.Process):
         self._data_flush_interval = 1.0
         self._last_data_flush = None
 
-        self.stage_stats = xy_stage_stats.copy()
+        self.stage_config = xy_stage_config.copy()
 
         # Attributes to interact with the actual process stuff running within run()
         self.stop_recv_data = multiprocessing.Event()
@@ -403,7 +403,7 @@ class IrradInterpreter(multiprocessing.Process):
 
                 self.data_pub.send_json(fluence_data)
 
-                self._update_xy_stage_stats(server)
+                self._update_xy_stage_config(server)
 
             elif data['status'] == 'finished':
 
@@ -429,7 +429,7 @@ class IrradInterpreter(multiprocessing.Process):
         if self._stage_scanning:
             self._beam_currents[server].append(self.beam_data[server]['current_analog'][0])
 
-    def _update_xy_stage_stats(self, server):
+    def _update_xy_stage_config(self, server):
 
         # Add to xy stage stats
         # This iterations travel
@@ -437,22 +437,22 @@ class IrradInterpreter(multiprocessing.Process):
         y_travel = float(self.fluence_data[server]['step'][0] * 1e-3)
 
         # Add to total
-        self.stage_stats['total_travel']['x'] += x_travel
-        self.stage_stats['total_travel']['y'] += y_travel
+        self.stage_config['total_travel']['x'] += x_travel
+        self.stage_config['total_travel']['y'] += y_travel
 
         # Add to interval
-        self.stage_stats['interval_travel']['x'] += x_travel
-        self.stage_stats['interval_travel']['y'] += y_travel
+        self.stage_config['interval_travel']['x'] += x_travel
+        self.stage_config['interval_travel']['y'] += y_travel
 
         # Check if any axis has reached interval travel
         for axis in ('x', 'y'):
-            if self.stage_stats['interval_travel'][axis] > self.stage_stats['maintenance_interval']:
-                self.stage_stats['interval_travel'][axis] = 0.0
+            if self.stage_config['interval_travel'][axis] > self.stage_config['maintenance_interval']:
+                self.stage_config['interval_travel'][axis] = 0.0
                 self.xy_stage_maintenance.set()
                 logging.warning("{}-axis of XY-stage reached service interval travel! "
                                 "See https://www.zaber.com/wiki/Manuals/X-LRQ-E#Precautions".format(axis))
 
-        self.stage_stats['last_update'] = time.asctime()
+        self.stage_config['last_update'] = time.asctime()
 
     def _calc_digital_shift(self, data, server, ch_types, m='h'):
         """Calculate the beam displacement on the secondary electron monitor from the digitized foil signals"""
@@ -670,8 +670,8 @@ class IrradInterpreter(multiprocessing.Process):
             self._close_tables()
 
             # Overwrite xy stage stats
-            with open(os.path.join(config_path, 'xy_stage_stats.yaml'), 'w') as _xys:
-                yaml.safe_dump(self.stage_stats, _xys, default_flow_style=False)
+            with open(os.path.join(package_path, 'devices/stage/xy_stage_config.yaml'), 'w') as _xys:
+                yaml.safe_dump(self.stage_config, _xys, default_flow_style=False)
 
             # User info
             logging.info('{} finished'.format(self.name.capitalize()))
