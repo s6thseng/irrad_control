@@ -258,7 +258,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
             self.proc_mngr.connect_to_server(hostname=server, username='pi')
 
             # Prepare server in QThread on init
-            server_config_workers[server] = Worker(func=self.proc_mngr.configure_server, hostname=server, branch='development')
+            server_config_workers[server] = Worker(func=self.proc_mngr.configure_server, hostname=server, branch='master', git_pull=True)
 
             # Connect workers finish signal to starting process on server
             for con in [lambda _server=server: self.proc_mngr.start_server_process(_server, self.setup['port']['cmd']),
@@ -637,7 +637,8 @@ class IrradControlWin(QtWidgets.QMainWindow):
                 # Shutdown all the servers
                 if host in self.setup['server']:
                     logging.info("Shutting down server at {}".format(host))
-                    self.send_cmd(host, 'server', 'shutdown')
+                    # FIXME: server does not always send a reply https://github.com/zeromq/libzmq/issues/1264
+                    self.send_cmd(host, 'server', 'shutdown', check_reply=False)
 
                 # Shutdown interpreter
                 if host == 'localhost':
