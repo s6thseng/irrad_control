@@ -61,6 +61,11 @@ class GridContainer(QtWidgets.QGroupBox):
             n_widgets = 1
 
         if n_widgets == 1:
+            # Catch edge case in which we get an iterable with only one widget e.g. item=[QLabel]
+            try:
+                item = item[0]
+            except TypeError:
+                pass
             self._add_to_grid(item, self.cnt_row, 0)
         else:
             # Loop over all widgets and add to layout
