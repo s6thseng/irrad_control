@@ -24,25 +24,20 @@ if _YAML:
     config_server_script = os.path.join(package_path, 'configure_server.sh')
 
     # Load network and data acquisition config
-    with open(os.path.join(config_path, 'network_config.yaml'), 'r') as nc:
-        network_config = yaml.safe_load(nc)
-    del nc
+    with open(os.path.join(config_path, 'network_config.yaml'), 'r') as _nc:
+        network_config = yaml.safe_load(_nc)
 
-    with open(os.path.join(config_path, 'daq_config.yaml'), 'r') as dc:
-        daq_config = yaml.safe_load(dc)
-    del dc
+    with open(os.path.join(config_path, 'daq_config.yaml'), 'r') as _dc:
+        daq_config = yaml.safe_load(_dc)
 
-    # Keep track of xy stage travel
-    if not os.path.isfile(os.path.join(package_path, 'devices/stage/xy_stage_stats.yaml')):
+    # Keep track of xy stage travel and known positions
+    if not os.path.isfile(os.path.join(package_path, 'devices/stage/xy_stage_config.yaml')):
         # Open xy stats template and safe a copy
-        with open(os.path.join(config_path, 'xy_stage_stats.yaml'), 'r') as xys_l:
-            xy_stage_stats_tmp = yaml.safe_load(xys_l)
+        with open(os.path.join(config_path, 'xy_stage_config.yaml'), 'r') as _xys_l:
+            _xy_stage_config_tmp = yaml.safe_load(_xys_l)
 
-        with open(os.path.join(package_path, 'devices/stage/xy_stage_stats.yaml'), 'w') as xys_s:
-            yaml.safe_dump(xy_stage_stats_tmp, xys_s)
+        with open(os.path.join(package_path, 'devices/stage/xy_stage_config.yaml'), 'w') as _xys_s:
+            yaml.safe_dump(_xy_stage_config_tmp, _xys_s)
 
-        del xy_stage_stats_tmp, xys_l, xys_s
-
-    with open(os.path.join(package_path, 'devices/stage/xy_stage_stats.yaml'), 'r') as xys:
-        xy_stage_stats = yaml.safe_load(xys)
-    del xys
+    with open(os.path.join(package_path, 'devices/stage/xy_stage_config.yaml'), 'r') as _xys:
+        xy_stage_config = yaml.safe_load(_xys)

@@ -2,9 +2,10 @@
 
 # Configuration of available DAQ devices aka secondary electron monitors (SEM)
 sem:
-  default: SEM-39-deg
+  default: SEM-15-deg
   all:
     - SEM-39-deg
+    - SEM-15-deg
 
 # Descriptor of hardware-related output behind digitized voltage signal or channel
 adc_channels:
@@ -23,7 +24,7 @@ adc_channels:
 # of the custom readout electronics (3.3,10,33,100,330,1000) in [nA] and the proportionality constant lambda in [1/V] like:
 # I_Beam(U_SEM) = lambda * I_fs * U_SEM
 lambda:
-  default: lambda_3
+  default: lambda_4
   all:
     lambda_1:
       nominal: 770.97e-3
@@ -31,6 +32,8 @@ lambda:
       hv_sem: 70 V
       unit: 1/V
       device: SEM-39-deg
+      particle: proton
+      energy: 14 MeV
       ascitime: Thu Jan 23 00:00:00 2019
     lambda_2:
       nominal: 837.70e-3
@@ -38,6 +41,8 @@ lambda:
       hv_sem: 100 V
       unit: 1/V
       device: SEM-39-deg
+      particle: proton
+      energy: 14 MeV
       ascitime: Tue Feb 5 14:50:03 2019
     lambda_3:
       nominal: 850.50e-3
@@ -45,7 +50,18 @@ lambda:
       hv_sem: 100 V
       unit: 1/V
       device: SEM-39-deg
+      particle: proton
+      energy: 14 MeV
       ascitime: Thu Aug 8 14:00:00 2019
+    lambda_4:
+      nominal: 512.70e-3
+      sigma: 24.14e-3  # Larger error due to capacitive coupling of external cup to insulating surface
+      hv_sem: 100 V
+      unit: 1/V
+      device: SEM-15-deg
+      particle: proton
+      energy: 14 MeV
+      ascitime: Wed Oct 16 15:45:00 2019
 
 # Proton hardness factors
 kappa:

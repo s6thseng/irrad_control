@@ -36,7 +36,7 @@ class IrradServer(multiprocessing.Process):
                          'temp': [],
                          'server': ['start', 'shutdown'],
                          'stage': ['move_rel', 'move_abs', 'prepare', 'scan', 'finish', 'stop', 'pos', 'home',
-                                   'set_speed', 'get_speed', 'no_beam']
+                                   'set_speed', 'get_speed', 'no_beam', 'set_range']
                          }
 
         # Attribute to store setup in
@@ -262,10 +262,10 @@ class IrradServer(multiprocessing.Process):
                 self._start_server(cmd_data)
 
                 # Send reply which is PID of this process
-                self._send_reply(reply='pid', data=self.ident, sender='server', _type='STANDARD')
+                self._send_reply(reply=cmd, data=self.ident, sender=target, _type='STANDARD')
 
             elif cmd == 'shutdown':
-                self._send_reply(reply='shutdown', _type='STANDARD', sender='server')
+                self._send_reply(reply=cmd, _type='STANDARD', sender=target)
                 self.stop_send_data.set()
                 self.stop_send_temp.set()
                 self.stop_recv_cmds.set()
@@ -274,28 +274,27 @@ class IrradServer(multiprocessing.Process):
 
             if cmd == 'move_rel':
                 axis = cmd_data['axis']
-                _data = None
                 if axis == 'x':
-                    self.xy_stage.move_horizontal(cmd_data['distance'], unit=cmd_data['unit'])
-                    _data = self.xy_stage.microstep * self.xy_stage.x_axis.get_position()
+                    self.xy_stage.move_relative(cmd_data['distance'], self.xy_stage.x_axis, unit=cmd_data['unit'])
                 elif axis == 'y':
-                    self.xy_stage.move_vertical(cmd_data['distance'], unit=cmd_data['unit'])
-                    _data = self.xy_stage.microstep * self.xy_stage.y_axis.get_position()
+                    self.xy_stage.move_relative(cmd_data['distance'], self.xy_stage.y_axis, unit=cmd_data['unit'])
 
-                self._send_reply(reply='move_rel', _type='STANDARD', sender='stage', data=_data)
+                _data = [self.xy_stage.steps_to_distance(pos, unit='mm') for pos in self.xy_stage.position]
+
+                self._send_reply(reply=cmd, _type='STANDARD', sender=target, data=_data)
 
             elif cmd == 'move_abs':
                 axis = cmd_data['axis']
-                _data = None
-                dist_steps = self.xy_stage.distance_to_steps(cmd_data['distance'], unit=cmd_data['unit'])
                 if axis == 'x':
-                    self.xy_stage.x_axis.move_abs(dist_steps)
-                    _data = self.xy_stage.microstep * self.xy_stage.x_axis.get_position()
+                    self.xy_stage.move_absolute(cmd_data['distance'], self.xy_stage.x_axis, unit=cmd_data['unit'])
                 elif axis == 'y':
-                    self.xy_stage.y_axis.move_abs(dist_steps)
-                    _data = self.xy_stage.microstep * self.xy_stage.y_axis.get_position()
+                    _m_dist = self.xy_stage.steps_to_distance(int(300e-3 / self.xy_stage.microstep), unit=cmd_data['unit'])
+                    d = _m_dist - cmd_data['distance']
+                    self.xy_stage.move_absolute(d, self.xy_stage.y_axis, unit=cmd_data['unit'])
 
-                self._send_reply(reply='move_abs', _type='STANDARD', sender='stage', data=_data)
+                _data = [self.xy_stage.steps_to_distance(pos, unit='mm') for pos in self.xy_stage.position]
+
+                self._send_reply(reply=cmd, _type='STANDARD', sender=target, data=_data)
 
             elif cmd == 'set_speed':
                 axis = cmd_data['axis']
@@ -304,7 +303,20 @@ class IrradServer(multiprocessing.Process):
                 elif axis == 'y':
                     self.xy_stage.set_speed(cmd_data['speed'], self.xy_stage.y_axis, unit=cmd_data['unit'])
 
-                self._send_reply(reply='set_speed', _type='STANDARD', sender='stage')
+                _data = [self.xy_stage.get_speed(a, unit='mm/s') for a in (self.xy_stage.x_axis, self.xy_stage.y_axis)]
+
+                self._send_reply(reply=cmd, _type='STANDARD', sender=target, data=_data)
+
+            elif cmd == 'set_range':
+                axis = cmd_data['axis']
+                if axis == 'x':
+                    self.xy_stage.set_range(cmd_data['range'], self.xy_stage.x_axis, unit=cmd_data['unit'])
+                elif axis == 'y':
+                    self.xy_stage.set_range(cmd_data['range'], self.xy_stage.y_axis, unit=cmd_data['unit'])
+
+                _data = [self.xy_stage.get_range(self.xy_stage.x_axis, unit='mm'), self.xy_stage.get_range(self.xy_stage.y_axis, unit='mm')]
+
+                self._send_reply(reply=cmd, _type='STANDARD', sender=target, data=_data)
 
             elif cmd == 'prepare':
                 self.xy_stage.prepare_scan(tcp_address=self._tcp_addr(port=self.setup['port']['stage']),
@@ -312,34 +324,34 @@ class IrradServer(multiprocessing.Process):
                                            **cmd_data)
                 _data = {'n_rows': self.xy_stage.scan_params['n_rows'], 'rows': self.xy_stage.scan_params['rows']}
 
-                self._send_reply(reply='prepare', _type='STANDARD', sender='stage', data=_data)
+                self._send_reply(reply=cmd, _type='STANDARD', sender=target, data=_data)
 
             elif cmd == 'scan':
                 self.xy_stage.scan_device()
-                self._send_reply(reply='scan', _type='STANDARD', sender='stage')
+                self._send_reply(reply=cmd, _type='STANDARD', sender=target)
 
             elif cmd == 'stop':
                 if not self.xy_stage.stop_scan.is_set():
                     self.xy_stage.stop_scan.set()
-                self._send_reply(reply='stop', _type='STANDARD', sender='stage')
+                self._send_reply(reply=cmd, _type='STANDARD', sender=target)
 
             elif cmd == 'finish':
                 if not self.xy_stage.finish_scan.is_set():
                     self.xy_stage.finish_scan.set()
-                self._send_reply(reply='finish', _type='STANDARD', sender='stage')
+                self._send_reply(reply=cmd, _type='STANDARD', sender=target)
 
             elif cmd == 'pos':
-                pos = [x.get_position() * self.xy_stage.microstep for x in (self.xy_stage.x_axis, self.xy_stage.y_axis)]
-                pos[1] = self.xy_stage.microstep * self.xy_stage.y_range_steps[-1] - pos[1]
-                self._send_reply(reply='pos', _type='STANDARD', sender='stage', data=pos)
+                _data = [self.xy_stage.steps_to_distance(pos, unit='mm') for pos in self.xy_stage.position]
+                self._send_reply(reply=cmd, _type='STANDARD', sender=target, data=_data)
 
             elif cmd == 'get_speed':
                 speed = [self.xy_stage.get_speed(a, unit='mm/s') for a in (self.xy_stage.x_axis, self.xy_stage.y_axis)]
-                self._send_reply(reply='get_speed', _type='STANDARD', sender='stage', data=speed)
+                self._send_reply(reply=cmd, _type='STANDARD', sender=target, data=speed)
 
             elif cmd == 'home':
                 self.xy_stage.home_stage()
-                self._send_reply(reply='home', _type='STANDARD', sender='stage')
+                _data = [self.xy_stage.steps_to_distance(pos, unit='mm') for pos in self.xy_stage.position]
+                self._send_reply(reply=cmd, _type='STANDARD', sender=target, data=_data)
 
             elif cmd == 'no_beam':
                 if cmd_data:
@@ -348,7 +360,7 @@ class IrradServer(multiprocessing.Process):
                 else:
                     if self.xy_stage.no_beam.is_set():
                         self.xy_stage.no_beam.clear()
-                self._send_reply(reply='no_beam', _type='STANDARD', sender='stage', data=cmd_data)
+                self._send_reply(reply=cmd, _type='STANDARD', sender=target, data=cmd_data)
 
         # Set busy False after executed cmd
         self._busy_cmd = False
