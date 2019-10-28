@@ -35,12 +35,14 @@ class IrradControlTab(QtWidgets.QWidget):
         self.scan_params = OrderedDict()
         self.beam_down = False
         self.beam_down_timer = None
+        self.info_labels = {}
+        self._scan_param_units = {}
 
         # Layouts; split in quadrants
         self.main_layout = QtWidgets.QHBoxLayout()
 
         # Make quadrants
-        self.info_widget = GridContainer('Setup info')
+        self.info_widget = GridContainer('Info')
         self.control_widget = GridContainer('Setup control')
         self.scan_widget = GridContainer('Scan')
         self.daq_widget = GridContainer('DAQ')
@@ -229,7 +231,7 @@ class IrradControlTab(QtWidgets.QWidget):
         spx_step_size.setMaximum(10.0)
         spx_step_size.setDecimals(3)
         spx_step_size.setSuffix(" mm")
-        spx_step_size.valueChanged.connect(lambda v: self.update_scan_parameters(step_size=v))
+        spx_step_size.valueChanged.connect(lambda v, spx=spx_step_size: self.update_scan_parameters(step_size=v, unit=spx.suffix()))
         spx_step_size.setValue(1.0)
 
         # Scan speed
@@ -239,7 +241,7 @@ class IrradControlTab(QtWidgets.QWidget):
         spx_scan_speed.setMaximum(200.)
         spx_scan_speed.setDecimals(3)
         spx_scan_speed.setSuffix(' mm/s')
-        spx_scan_speed.valueChanged.connect(lambda v: self.update_scan_parameters(scan_speed=v))
+        spx_scan_speed.valueChanged.connect(lambda v, spx=spx_scan_speed: self.update_scan_parameters(scan_speed=v, unit=spx.suffix()))
         spx_scan_speed.setValue(80.0)
 
         # Beam current
@@ -278,8 +280,8 @@ class IrradControlTab(QtWidgets.QWidget):
         spx_start_y.setDecimals(3)
         spx_start_y.setPrefix('y: ')
         spx_start_y.setSuffix(" mm")
-        spx_start_x.valueChanged.connect(lambda v: self.update_scan_parameters(rel_start_point=(v, spx_start_y.value())))
-        spx_start_y.valueChanged.connect(lambda v: self.update_scan_parameters(rel_start_point=(spx_start_x.value(), v)))
+        spx_start_x.valueChanged.connect(lambda v, spx=spx_start_x: self.update_scan_parameters(rel_start_point=(v, spx_start_y.value()), unit=spx.suffix()))
+        spx_start_y.valueChanged.connect(lambda v, spx=spx_start_y: self.update_scan_parameters(rel_start_point=(spx_start_x.value(), v), unit=spx.suffix()))
         spx_start_x.valueChanged.emit(0.0)
 
         # End point
@@ -294,8 +296,8 @@ class IrradControlTab(QtWidgets.QWidget):
         spx_end_y.setDecimals(3)
         spx_end_y.setPrefix('y: ')
         spx_end_y.setSuffix(' mm')
-        spx_end_x.valueChanged.connect(lambda v: self.update_scan_parameters(rel_end_point=(v, spx_end_y.value())))
-        spx_end_y.valueChanged.connect(lambda v: self.update_scan_parameters(rel_end_point=(spx_end_x.value(), v)))
+        spx_end_x.valueChanged.connect(lambda v, spx=spx_end_x: self.update_scan_parameters(rel_end_point=(v, spx_end_y.value()), unit=spx.suffix()))
+        spx_end_y.valueChanged.connect(lambda v, spx=spx_end_y: self.update_scan_parameters(rel_end_point=(spx_end_x.value(), v), unit=spx.suffix()))
         spx_end_x.valueChanged.emit(0.0)
 
         self.btn_start = QtWidgets.QPushButton('START')
@@ -365,29 +367,54 @@ class IrradControlTab(QtWidgets.QWidget):
 
     def _setup_info(self):
 
-        # Label for current position position
-        self.label_current_pos = QtWidgets.QLabel('Current position: ({} mm, {} mm)'.format(*self.current_pos))
+        # Info for setup
+        setup_info = GridContainer('Setup')
 
-        # Label for speeds position
-        self.label_current_speed = QtWidgets.QLabel('Current speeds: ({} mm/s, {} mm/s)'.format(*self.current_speed))
+        # Info on position
+        label_position_info = QtWidgets.QLabel('Position:')
 
-        # Label for scan speed
-        self.label_stage_state = QtWidgets.QLabel('Stage status:')
+        # Info on position
+        label_speed_info = QtWidgets.QLabel('Speed:')
 
-        # Label for scan speed
-        self.label_fluence_row = QtWidgets.QLabel('Fluence in previous row:')
-        self.label_fluence_scan = QtWidgets.QLabel('Fluence over completed scans:')
-        self.label_n_scans = QtWidgets.QLabel('Estimated remaining scans:')
-        self.label_scan = QtWidgets.QLabel('Scan parameters:\n\t')
-        self.label_scan_dict = {}
+        # Info on travel range
+        label_range_info = QtWidgets.QLabel('Travel ranges:')
 
-        self.info_widget.add_widget(widget=self.label_current_pos)
-        self.info_widget.add_widget(widget=self.label_current_speed)
-        self.info_widget.add_widget(widget=self.label_stage_state)
-        self.info_widget.add_widget(widget=self.label_fluence_row)
-        self.info_widget.add_widget(widget=self.label_fluence_scan)
-        self.info_widget.add_widget(widget=self.label_n_scans)
-        self.info_widget.add_widget(widget=self.label_scan)
+        # Add to layout
+        setup_info.add_widget(widget=label_position_info)
+        setup_info.add_widget(widget=label_speed_info)
+        setup_info.add_widget(widget=label_range_info)
+
+        scan_info = GridContainer('Scan')
+
+        # Stage status info
+        label_stage_status = QtWidgets.QLabel('Stage status:')
+
+        # Info on fluence in row
+        label_fluence_row = QtWidgets.QLabel("Fluence previous row:")
+
+        # Info on fluence in scan
+        label_fluence_scan = QtWidgets.QLabel("Fluence completed scans:")
+
+        # Remaining scans info
+        label_nscan_info = QtWidgets.QLabel('Est. remaining scans:')
+
+        # Scan parameters
+        label_scan_params = QtWidgets.QLabel('Scan parameters:')
+
+        # Add to layout
+        scan_info.add_widget(widget=label_stage_status)
+        scan_info.add_widget(widget=label_fluence_row)
+        scan_info.add_widget(widget=label_fluence_scan)
+        scan_info.add_widget(widget=label_nscan_info)
+        scan_info.add_widget(widget=label_scan_params)
+
+        # Store labels in class attribute to change their text later
+        self.info_labels ={'setup': {'position': label_position_info, 'speed': label_speed_info, 'range': label_range_info},
+                           'fluence': {'row': label_fluence_row, 'scan': label_fluence_scan},
+                           'scan': {'status': label_stage_status, 'nscan': label_nscan_info, 'params': label_scan_params}}
+
+        self.info_widget.add_widget(widget=setup_info)
+        self.info_widget.add_widget(widget=scan_info)
 
         # Add spacer layout
         spacer = QtWidgets.QVBoxLayout()
@@ -425,61 +452,74 @@ class IrradControlTab(QtWidgets.QWidget):
                         self.send_cmd('stage', 'no_beam', False)
                         self.beam_down = False
 
+    def update_info(self, **info):
+        """Method to update the text of the label infos"""
+
+        unit = None if 'unit' not in info else info['unit']
+        entries = [self.info_labels[k] for k in self.info_labels]
+
+        # Loop over potentially many info kwargs
+        for kw in info:
+            for entry in entries:
+                if kw in entry:
+
+                    # Get text of label
+                    tmp_text = entry[kw].text()
+
+                    # Update position label
+                    if kw == 'position':
+                        tmp_text = kw.capitalize() + ': ' + '({:.3f}, {:.3f})'.format(*info[kw]) + '' if unit is None else ' {}'.format(unit)
+                    # Update speed label
+                    elif kw == 'speed':
+                        tmp_text = kw.capitalize() + ': ' + '({:.3f}, {:.3f})'.format(*info[kw]) + '' if unit is None else ' {}'.format(unit)
+                    # Update travel range label
+                    elif kw == 'range':
+                        tmp_text = kw.capitalize() + ': '
+                        tmp_text += 'x: ({:.3f}, {:.3f})'.format(*info[kw][0]) + ', ' if unit is None else ' {}, '.format(unit)
+                        tmp_text += 'y: ({:.3f}, {:.3f})'.format(*info[kw][1]) + ', ' if unit is None else ' {}, '.format(unit)
+                    # Update fluence in previous row label
+                    elif kw == 'row':
+                        tmp_text = 'Fluence previous row: ' + '{:.3E}'.format(info[kw]) + '' if unit is None else ' {}'.format(unit)
+                    # Update fluence overall scan label
+                    elif kw == 'scan':
+                        tmp_text = 'Fluence completed scans: ' + '{:.3E}'.format(info[kw]) + '' if unit is None else ' {}'.format(unit)
+                    # Update stage status label
+                    elif kw == 'status':
+                        tmp_text = 'Stage status: ' + '{}'.format(info[kw]) + '' if unit is None else ' {}'.format(unit)
+                    # Update estimated remaining scans label
+                    elif kw == 'nscan':
+                        tmp_text = 'Est. remaining scans: ' + '{}'.format(info[kw]) + '' if unit is None else ' {}'.format(unit)
+
+                    # Set text
+                    entry[kw].setText(tmp_text)
+
     def update_scan_parameters(self, **params):
 
-        # Update dict
-        self.scan_params.update(params)
+        unit = None if 'unit' not in params else params['unit'].strip()
 
-        for k in params:
-            try:
-                sfx = self.sender().suffix()
-            except Exception:
-                sfx = ""
-            if k == 'rows':
-                continue
-            self.label_scan_dict[k] = '{}: {} {}'.format(k, self.scan_params[k], sfx)
+        if unit is not None:
+            del params['unit']
 
-        new_l = 'Scan parameters:\n'
+        # Update dicts
+        for param in params:
+            self.scan_params[param] = params[param]
+            self._scan_param_units[param] = unit if unit is not None else ''
+
+        # Update params text
+        tmp_text = 'Scan parameters:\n'
         for i, n in enumerate(self.scan_params):
             if n == 'rows':
                 continue
-            new_l += '  ' + self.label_scan_dict[n] + ('\n' if (i+1) % 3 == 0 else '  ')
+            tmp_text += '{}: {} {}, '.format(n, self.scan_params[n], self._scan_param_units[n])
+            tmp_text += '\n' if (i + 1) % 4 == 0 else ''
 
-        self.label_scan.setText(new_l)
+        self.info_labels['scan']['params'].setText(tmp_text)
 
-    def update_position(self, pos):
-        self.current_pos = pos
-        self.label_current_pos.setText('Current position: ({:.3f} mm, {:.3f} mm)'.format(*pos))
+    def scan_status(self, status='started'):
 
-    def update_stage_status(self, status):
-        self.label_stage_state.setText('Stage status: {}'.format(status))
+        # Disable control widgets during scan
+        self.scan_widget.set_read_only(read_only=status == 'started', omit=QtWidgets.QPushButton)
+        self.scan_widget.set_widget_read_only(self.btn_start, read_only=status == 'started')
+        self.control_widget.set_read_only(read_only=status == 'started')
+        self.daq_widget.set_read_only(read_only=status == 'started')
 
-    def update_speed(self, speed):
-        self.current_speed = speed
-        self.label_current_speed.setText('Current speeds: ({:.3f} mm/s, {:.3f} mm/s)'.format(*speed))
-
-    def update_fluence(self, fluence, type_='row'):
-        if type_ == 'row':
-            self.label_fluence_row.setText('Fluence previous row: {:.3E} p/cm^2'.format(fluence))
-        else:
-            self.label_fluence_scan.setText('Fluence complete scans: {:.3E} p/cm^2'.format(fluence))
-
-    def update_n_scans(self, n_scans):
-        self.label_n_scans.setText('Estimated remaining scans: {}'.format(n_scans))
-
-    def set_read_only(self, layout, read_only=True):
-
-        for i in reversed(range(layout.count())):
-            if isinstance(layout.itemAt(i), QtWidgets.QWidgetItem):
-                w = layout.itemAt(i).widget()
-                if not isinstance(w, QtWidgets.QPushButton):
-                    w.setEnabled(not read_only)
-
-    def scan_actions(self, status='started'):
-
-        flag = True if status == 'started' else False
-
-        self.set_read_only(self.layout_scan, read_only=flag)
-        self.btn_start.setEnabled(not flag)
-
-        self.control_widget.setDisabled(flag)
