@@ -114,7 +114,7 @@ class GridContainer(QtWidgets.QGroupBox):
                     # Extract widget and set read_only
                     _widget = item.widget()
                     if type(_widget) not in omit:
-                        self._set_widget_read_only(widget=_widget, read_only=read_only)
+                        self.set_widget_read_only(widget=_widget, read_only=read_only)
 
                 elif isinstance(item, QtWidgets.QLayoutItem):
                     # Loop over layout and disable widgets
@@ -124,12 +124,12 @@ class GridContainer(QtWidgets.QGroupBox):
                         if isinstance(_layout.itemAt(i), QtWidgets.QWidgetItem):
                             _widget = _layout.itemAt(i).widget()
                             if type(_widget) not in omit:
-                                self._set_widget_read_only(widget=_widget, read_only=read_only)
+                                self.set_widget_read_only(widget=_widget, read_only=read_only)
                 else:
                     raise TypeError('Item must be either QWidgetItem or QLayoutItem. Found {}'.format(type(item)))
 
     @staticmethod
-    def _set_widget_read_only(widget, read_only=True):
+    def set_widget_read_only(widget, read_only=True):
         """Set widget to read only. Use widgets setReadOnly-method else just disable"""
 
         # We don't have to do anything with labels
