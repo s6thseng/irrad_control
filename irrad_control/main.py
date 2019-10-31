@@ -354,28 +354,29 @@ class IrradControlWin(QtWidgets.QMainWindow):
             if lower_mean_f >= self.control_tab.aim_fluence:
                 self.send_cmd(server, 'stage', 'finish')
 
-            self.control_tab.update_fluence(hist[self.control_tab.scan_params['row']],  type_='row')
+            self.control_tab.update_info(row=hist[self.control_tab.scan_params['row']], unit='p/cm^2')
 
             if self.control_tab.scan_params['row'] in (0, self.control_tab.scan_params['n_rows'] - 1):
                 mean_fluence = sum(hist) / len(hist)
-                self.control_tab.update_fluence(mean_fluence, type_='scan')
+                self.control_tab.update_info(scan=mean_fluence, unit='p/cm^2')
                 est_n_scans = (self.control_tab.aim_fluence - mean_fluence) / (self.control_tab.beam_current / (1.60217733e-19 * self.control_tab.scan_params['scan_speed'] * self.control_tab.scan_params['step_size'] * 1e-2))
-                self.control_tab.update_n_scans(int(est_n_scans))
+                self.control_tab.update_info(nscan=int(est_n_scans))
 
         elif data['meta']['type'] == 'stage':
 
             if data['data']['status'] == 'start':
-                self.control_tab.update_position([data['data']['x_start'], data['data']['y_start']])
-                self.control_tab.update_scan_parameters(scan=data['data']['scan'], row=data['data']['row'], scan_speed=data['data']['speed'])
-                self.control_tab.update_stage_status('Scanning...')
+                self.control_tab.update_info(position=[data['data']['x_start'], data['data']['y_start']], unit='mm')
+                self.control_tab.update_scan_parameters(scan=data['data']['scan'], row=data['data']['row'])
+                self.control_tab.update_scan_parameters(scan_speed=data['data']['speed'], unit='mm/s')
+                self.control_tab.update_info(status='Scanning...')
 
             elif data['data']['status'] == 'stop':
-                self.control_tab.update_position([data['data']['x_stop'], data['data']['y_stop']])
-                self.control_tab.update_stage_status('Turning')
+                self.control_tab.update_info(position=[data['data']['x_stop'], data['data']['y_stop']], unit='mm')
+                self.control_tab.update_info(status='Turning')
 
             elif data['data']['status'] == 'finished':
 
-                self.control_tab.scan_actions(data['data']['status'])
+                self.control_tab.scan_status(data['data']['status'])
 
         elif data['meta']['type'] == 'temp':
 
@@ -443,6 +444,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
                     if 'stage' in self.setup['server'][hostname]['devices']:
                         self.send_cmd(hostname, 'stage', 'pos')
                         self.send_cmd(hostname, 'stage', 'get_speed')
+                        self.send_cmd(hostname, 'stage', 'get_range')
 
                 elif reply == 'shutdown':
 
@@ -467,20 +469,20 @@ class IrradControlWin(QtWidgets.QMainWindow):
             elif sender == 'stage':
 
                 if reply in ['pos', 'move_rel', 'move_abs']:
-                    self.control_tab.update_position(reply_data)
+                    self.control_tab.update_info(position=reply_data, unit='mm')
 
                 elif reply in ['set_speed', 'get_speed']:
-                    self.control_tab.update_speed(reply_data)
+                    self.control_tab.update_info(speed=reply_data, unit='mm/s')
 
                 elif reply == 'prepare':
                     self.control_tab.update_scan_parameters(**reply_data)
                     self.monitor_tab.add_fluence_hist(**{'kappa': self.setup['server'][hostname]['devices']['daq']['kappa'],
                                                          'n_rows': reply_data['n_rows']})
                     self.send_cmd(hostname=hostname, target='stage', cmd='scan')
-                    self.control_tab.scan_actions('started')
+                    self.control_tab.scan_status('started')
 
                     est_n_scans = self.control_tab.aim_fluence / (self.control_tab.beam_current / (1.60217733e-19 * self.control_tab.scan_params['scan_speed'] * self.control_tab.scan_params['step_size'] * 1e-2))
-                    self.control_tab.update_n_scans(int(est_n_scans))
+                    self.control_tab.update_info(nscan=int(est_n_scans))
 
                 elif reply == 'finish':
 
