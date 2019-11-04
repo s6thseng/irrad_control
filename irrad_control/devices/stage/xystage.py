@@ -277,7 +277,7 @@ class ZaberXYStage:
         success = [self._check_reply(_reply) for _reply in _replies]
 
         # Get speed in steps per second; 0 if command didn't succeed
-        _range = [0 if not success[i] else int(_reply.data) for i, reply in enumerate(_replies)]
+        _range = [0 if not success[i] else int(_reply.data) for i, _reply in enumerate(_replies)]
 
         unit = unit if unit is None else self._check_unit(unit, self.dist_units)
 
