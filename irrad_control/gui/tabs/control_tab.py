@@ -468,27 +468,27 @@ class IrradControlTab(QtWidgets.QWidget):
 
                     # Update position label
                     if kw == 'position':
-                        tmp_text = kw.capitalize() + ': ' + '({:.3f}, {:.3f})'.format(*info[kw]) + '' if unit is None else ' {}'.format(unit)
+                        tmp_text = kw.capitalize() + ': ' + '({:.3f}, {:.3f})'.format(*info[kw]) + ('' if unit is None else ' {}'.format(unit))
                     # Update speed label
                     elif kw == 'speed':
-                        tmp_text = kw.capitalize() + ': ' + '({:.3f}, {:.3f})'.format(*info[kw]) + '' if unit is None else ' {}'.format(unit)
+                        tmp_text = kw.capitalize() + ': ' + '({:.3f}, {:.3f})'.format(*info[kw]) + ('' if unit is None else ' {}'.format(unit))
                     # Update travel range label
                     elif kw == 'range':
                         tmp_text = kw.capitalize() + ': '
-                        tmp_text += 'x: ({:.3f}, {:.3f})'.format(*info[kw][0]) + ', ' if unit is None else ' {}, '.format(unit)
-                        tmp_text += 'y: ({:.3f}, {:.3f})'.format(*info[kw][1]) + ', ' if unit is None else ' {}, '.format(unit)
+                        tmp_text += 'x: ({:.3f}, {:.3f})'.format(*info[kw][0]) + (', ' if unit is None else ' {}, '.format(unit))
+                        tmp_text += 'y: ({:.3f}, {:.3f})'.format(*info[kw][1]) + (', ' if unit is None else ' {}, '.format(unit))
                     # Update fluence in previous row label
                     elif kw == 'row':
-                        tmp_text = 'Fluence previous row: ' + '{:.3E}'.format(info[kw]) + '' if unit is None else ' {}'.format(unit)
+                        tmp_text = 'Fluence previous row: ' + '{:.3E}'.format(info[kw]) + ('' if unit is None else ' {}'.format(unit))
                     # Update fluence overall scan label
                     elif kw == 'scan':
-                        tmp_text = 'Fluence completed scans: ' + '{:.3E}'.format(info[kw]) + '' if unit is None else ' {}'.format(unit)
+                        tmp_text = 'Fluence completed scans: ' + '{:.3E}'.format(info[kw]) + ('' if unit is None else ' {}'.format(unit))
                     # Update stage status label
                     elif kw == 'status':
-                        tmp_text = 'Stage status: ' + '{}'.format(info[kw]) + '' if unit is None else ' {}'.format(unit)
+                        tmp_text = 'Stage status: ' + '{}'.format(info[kw]) + ('' if unit is None else ' {}'.format(unit))
                     # Update estimated remaining scans label
                     elif kw == 'nscan':
-                        tmp_text = 'Est. remaining scans: ' + '{}'.format(info[kw]) + '' if unit is None else ' {}'.format(unit)
+                        tmp_text = 'Est. remaining scans: ' + '{}'.format(info[kw]) + ('' if unit is None else ' {}'.format(unit))
 
                     # Set text
                     entry[kw].setText(tmp_text)
