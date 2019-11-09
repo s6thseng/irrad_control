@@ -474,6 +474,9 @@ class IrradControlWin(QtWidgets.QMainWindow):
                 elif reply in ['set_speed', 'get_speed']:
                     self.control_tab.update_info(speed=reply_data, unit='mm/s')
 
+                elif reply in ['set_range', 'get_range']:
+                    self.control_tab.update_info(range=reply_data, unit='mm')
+
                 elif reply == 'prepare':
                     self.control_tab.update_scan_parameters(**reply_data)
                     self.monitor_tab.add_fluence_hist(**{'kappa': self.setup['server'][hostname]['devices']['daq']['kappa'],
@@ -640,6 +643,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
                 if host in self.setup['server']:
                     logging.info("Shutting down server at {}".format(host))
                     # FIXME: server does not always send a reply https://github.com/zeromq/libzmq/issues/1264
+                    self.proc_mngr.current_procs.remove(host)
                     self.send_cmd(host, 'server', 'shutdown', check_reply=False)
 
                 # Shutdown interpreter
